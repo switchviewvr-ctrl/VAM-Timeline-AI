@@ -17,6 +17,7 @@ from vam_timeline_ai.io.json_utils import load_jsonl, write_jsonl
 
 
 BROKEN_LABELS = {"pose_broken", "export_pose_validity_issue"}
+ORIENTATION_INVALID_LABELS = {"controller_rotation_invalid", "controller_twist_invalid", "controller_orientation_invalid"}
 EXPORT_UNAVAILABLE_LABELS = {"export_unavailable"}
 LOW_MOTION_LABELS = {"low_motion_intro", "static_or_micro_motion", "static_or_empty", "minimal_head_motion", "minimal_hand_jitter"}
 TOO_SHORT_LABELS = {"too_short_for_semantic_judgment"}
@@ -35,6 +36,7 @@ def audit_pose_export_validity(
     report: str | Path,
     controller_validity: str | Path | None = None,
     pose_anchor_completeness: str | Path | None = None,
+    controller_orientation_validity: str | Path | None = None,
 ) -> list[dict[str, Any]]:
     review_path = Path(review_dir)
     review_rows = load_jsonl(review_path / "semantic_review_010.jsonl")
@@ -44,6 +46,7 @@ def audit_pose_export_validity(
     body = {r.get("window_id"): r for r in load_jsonl(body_quality) if r.get("window_id")}
     controller = {r.get("window_id"): r for r in load_jsonl(controller_validity) if r.get("window_id")} if controller_validity else {}
     anchors = {r.get("window_id"): r for r in load_jsonl(pose_anchor_completeness) if r.get("window_id")} if pose_anchor_completeness else {}
+    orientations = {r.get("window_id"): r for r in load_jsonl(controller_orientation_validity) if r.get("window_id")} if controller_orientation_validity else {}
     rows = [
         pose_export_validity_for_review_item(
             row,
@@ -53,6 +56,7 @@ def audit_pose_export_validity(
             body.get(row.get("window_id"), {}),
             controller.get(row.get("window_id"), {}),
             anchors.get(row.get("window_id"), {}),
+            orientations.get(row.get("window_id"), {}),
         )
         for row in review_rows
     ]
@@ -69,6 +73,7 @@ def pose_export_validity_for_review_item(
     body: dict[str, Any] | None,
     controller: dict[str, Any] | None = None,
     anchors: dict[str, Any] | None = None,
+    orientation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     answer = answer or {}
     sample = sample or {}
@@ -76,11 +81,13 @@ def pose_export_validity_for_review_item(
     body = body or {}
     controller = controller or {}
     anchors = anchors or {}
+    orientation = orientation or controller.get("controller_orientation_validity") or {}
     labels = {str(x) for x in (answer.get("actual_labels") or [])}
     verdict = str(answer.get("user_verdict") or "unknown")
     has_export = bool(review_row.get("has_timeline_export"))
     export_unavailable = (not has_export) or bool(labels & EXPORT_UNAVAILABLE_LABELS)
     broken = bool(labels & BROKEN_LABELS)
+    orientation_invalid = bool(labels & ORIENTATION_INVALID_LABELS)
     low_motion_intro = bool(labels & {"low_motion_intro", "cowgirl_intro_or_start_pose"})
     too_short = bool(labels & TOO_SHORT_LABELS) or float(review_row.get("duration_seconds") or 0.0) < 4.0
     receiver = bool(labels & RECEIVER_LABELS)
@@ -98,7 +105,7 @@ def pose_export_validity_for_review_item(
         export_pose_validity = "export_unavailable"
     elif broken:
         export_pose_validity = "broken_pose"
-    elif controller.get("controller_validity_status") == "invalid" or controller.get("foot_controller_outlier"):
+    elif controller.get("controller_validity_status") == "invalid" or controller.get("foot_controller_outlier") or orientation_invalid:
         export_pose_validity = "broken_pose"
     elif has_export and semantic_positive and not broken:
         export_pose_validity = "good"
@@ -114,6 +121,11 @@ def pose_export_validity_for_review_item(
     has_required = _has_required_body_controllers(relative)
     teleport_risk = str(relative.get("teleport_risk") or "unknown")
     controller_status = str(controller.get("controller_validity_status") or "unknown")
+    orientation_status = str(orientation.get("orientation_validity_status") or controller.get("orientation_validity_status") or "unknown")
+    controller_rotation_invalid = bool(orientation_invalid or orientation.get("controller_rotation_invalid") or controller.get("controller_rotation_invalid") or orientation_status == "invalid")
+    controller_twist_invalid = bool(orientation_invalid or orientation.get("controller_twist_invalid") or controller.get("controller_twist_invalid") or controller_rotation_invalid)
+    twisted_controller_names = list(orientation.get("twisted_controller_names") or controller.get("twisted_controller_names") or [])
+    foot_rotation_outlier = bool(orientation.get("foot_rotation_outlier") or controller.get("foot_rotation_outlier"))
     foot_outlier = bool(controller.get("foot_controller_outlier") or "foot_controller_outlier" in labels)
     hand_outlier = bool(controller.get("hand_controller_outlier") or "hand_controller_outlier" in labels)
     missing_foot = bool(controller.get("missing_foot_controllers") or anchors.get("missing_foot_controllers") or "missing_foot_controllers" in labels)
@@ -126,10 +138,11 @@ def pose_export_validity_for_review_item(
         controller_outlier_count += 1
     controller_generation_ok = True
     if controller:
-        controller_generation_ok = controller.get("generation_pose_valid") is True and controller_status == "valid" and not foot_outlier and not anchor_incomplete
+        controller_generation_ok = controller.get("generation_pose_valid") is True and controller_status == "valid" and not foot_outlier and not anchor_incomplete and not controller_rotation_invalid
     generation_safe = bool(
         not export_unavailable
         and not broken
+        and not controller_rotation_invalid
         and controller_generation_ok
         and semantic_valid is True
         and has_required
@@ -149,6 +162,10 @@ def pose_export_validity_for_review_item(
         warnings.append("Missing foot anchors block generation-template use; static feet still matter.")
     if missing_knee:
         warnings.append("Missing knee anchors make lower-body pose incomplete.")
+    if controller_rotation_invalid:
+        warnings.append("Controller rotation/orientation invalidity blocks generation-template use but does not automatically make semantics wrong.")
+    if foot_rotation_outlier:
+        warnings.append("Foot rotation outlier blocks generation-template use.")
     if export_unavailable:
         warnings.append("Export unavailable is not counted as semantic wrong.")
     if low_motion_intro:
@@ -172,6 +189,12 @@ def pose_export_validity_for_review_item(
         invalid_reasons.append("pose_anchor_incomplete")
     if controller_status == "invalid":
         invalid_reasons.append("controller_validity_invalid")
+    if controller_rotation_invalid:
+        invalid_reasons.append("controller_orientation_invalid")
+    if controller_twist_invalid:
+        invalid_reasons.append("controller_twist_invalid")
+    if foot_rotation_outlier:
+        invalid_reasons.append("foot_rotation_outlier")
     if export_unavailable:
         invalid_reasons.append("export_unavailable")
     if low_motion_intro:
@@ -199,6 +222,12 @@ def pose_export_validity_for_review_item(
         "motion_strength_score": round(float(motion_strength), 6),
         "controller_validity_status": controller_status,
         "controller_validity_score": controller.get("controller_validity_score"),
+        "orientation_validity_status": orientation_status,
+        "orientation_validity_score": orientation.get("orientation_validity_score") or controller.get("orientation_validity_score"),
+        "controller_rotation_invalid": controller_rotation_invalid,
+        "controller_twist_invalid": controller_twist_invalid,
+        "twisted_controller_names": twisted_controller_names,
+        "foot_rotation_outlier": foot_rotation_outlier,
         "foot_controller_outlier": foot_outlier,
         "hand_controller_outlier": hand_outlier,
         "missing_foot_controllers": missing_foot,
@@ -212,6 +241,7 @@ def pose_export_validity_for_review_item(
         "export_pose_valid_reason": export_valid_reason,
         "controller_validity": controller,
         "pose_anchor_completeness": anchors,
+        "controller_orientation_validity": orientation,
         "low_motion_intro_candidate": low_motion_intro,
         "too_short_for_semantic_judgment": too_short,
         "review_export_available": has_export,
@@ -256,7 +286,9 @@ def _write_report(rows: list[dict[str, Any]], report: str | Path) -> None:
     semantic = Counter(str(r.get("semantic_motion_likely_valid")) for r in rows)
     generation = Counter("safe" if r.get("generation_template_safe") else "blocked" for r in rows)
     controller = Counter(r.get("controller_validity_status") for r in rows)
+    orientation = Counter(r.get("orientation_validity_status") for r in rows)
     foot = sum(1 for r in rows if r.get("foot_controller_outlier"))
+    twist = sum(1 for r in rows if r.get("controller_rotation_invalid"))
     lines = [
         "# Pose / Export Validity Report",
         "",
@@ -264,6 +296,7 @@ def _write_report(rows: list[dict[str, Any]], report: str | Path) -> None:
         "",
         f"- Review items: {len(rows)}",
         f"- Foot/controller outlier items: {foot}",
+        f"- Controller rotation invalid items: {twist}",
         "",
         "## Semantic Motion Likely Valid",
         "",
@@ -275,6 +308,8 @@ def _write_report(rows: list[dict[str, Any]], report: str | Path) -> None:
     lines.extend(f"- `{k}`: {v}" for k, v in generation.most_common())
     lines.extend(["", "## Controller Validity", ""])
     lines.extend(f"- `{k}`: {v}" for k, v in controller.most_common()) if controller else lines.append("- None")
+    lines.extend(["", "## Orientation Validity", ""])
+    lines.extend(f"- `{k}`: {v}" for k, v in orientation.most_common()) if orientation else lines.append("- None")
     lines.extend(["", "## Semantically Good But Not Generation-Safe", ""])
     examples = [r for r in rows if r.get("semantic_motion_likely_valid") is True and not r.get("generation_template_safe")]
     if examples:

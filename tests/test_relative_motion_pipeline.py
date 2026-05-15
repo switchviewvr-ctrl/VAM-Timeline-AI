@@ -5,6 +5,7 @@ import numpy as np
 from vam_timeline_ai.audits.semantic_review import export_semantic_review_010
 from vam_timeline_ai.audits.pose_export_validity import pose_export_validity_for_review_item
 from vam_timeline_ai.audits.controller_validity import controller_validity_for_arrays
+from vam_timeline_ai.audits.controller_orientation_validity import controller_orientation_validity_for_arrays
 from vam_timeline_ai.audits.pose_anchor_completeness import pose_anchor_completeness_for_parts
 from vam_timeline_ai.audits.semantic_review import _filter_safe_export_controllers
 from vam_timeline_ai.features.relative_features import relative_features_from_arrays
@@ -13,7 +14,7 @@ from vam_timeline_ai.io.json_utils import load_jsonl, write_jsonl
 from vam_timeline_ai.motion.coordinate_spaces import can_use_for_final_export, is_allowed_body_controller_track, is_disallowed_world_or_root_track
 from vam_timeline_ai.motion.relative_motion import build_relative_motion_window_row
 from vam_timeline_ai.references.relative_matcher import compare_relative_wild_to_handmade
-from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_window_v4, score_window_v5, score_window_v6, score_window_v7
+from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_window_v4, score_window_v5, score_window_v6, score_window_v7, score_window_v8
 
 
 def _times(n=121):
@@ -534,3 +535,169 @@ def test_semantic_review_v9_preserves_anchor_incomplete_category(tmp_path):
     assert "semantic_cowgirl_anchor_incomplete" in categories
     assert "semantic_cowgirl_generation_safe" in categories
     assert all("pose_anchor_completeness" in r["evidence"] for r in rows)
+
+
+def test_controller_orientation_detects_synthetic_twisted_foot_rotation():
+    rotations = np.zeros((12, 2, 4), dtype=np.float32)
+    rotations[:, 1, 0] = np.linspace(0.0, 3.6, 12, dtype=np.float32)
+    row = controller_orientation_validity_for_arrays(rotations, ["hip", "left_foot"], ["hipControl", "lFootControl"], {"window_id": "win"})
+    assert row["orientation_validity_status"] == "invalid"
+    assert row["controller_rotation_invalid"]
+    assert row["foot_rotation_outlier"]
+    assert "lFootControl" in row["twisted_controller_names"]
+
+
+def test_controller_orientation_passes_plausible_rotations():
+    rotations = np.zeros((12, 2, 4), dtype=np.float32)
+    rotations[:, 1, 0] = np.linspace(0.0, 0.18, 12, dtype=np.float32)
+    row = controller_orientation_validity_for_arrays(rotations, ["hip", "left_foot"], ["hipControl", "lFootControl"], {"window_id": "win"})
+    assert row["orientation_validity_status"] == "valid"
+    assert not row["controller_rotation_invalid"]
+    assert row["generation_pose_valid"] is True
+
+
+def _v8_score(orientation_status="valid", standing=False, anchor_missing=False):
+    feature = {"window_id": "win", "sample_id": "sample", "source_id": "src", "feature_values": {}}
+    body = {"body_motion_quality": "good_body_motion"}
+    if standing:
+        body.update({"minimal_head_motion_only": True})
+    rel_match = {"cowgirl_relative_score": 0.9, "cowgirl_grind_trajectory_score": 0.85, "safe_for_learning": True, "recommended_review_status": "likely_isolated_gesture" if standing else "likely_cowgirl_candidate"}
+    rel_feature = {"feature_values": {"safe_for_learning": 1.0, "local_path_length": 1.0, "local_motion_energy": 1.0}, "feature_quality": {"teleport_risk": "low"}}
+    traj = {"trajectory_shape_classification": "oval_grind", "feature_values": {"oval_path_score": 0.85, "ellipse_fit_score": 0.8, "closed_loop_ratio": 0.75, "grind_pattern_score": 0.85, "jitter_score": 0.05, "transition_path_score": 0.05}}
+    rider = {"rider_receiver_status": "likely_active_rider", "active_rider_score": 0.85, "receiver_body_response_score": 0.05}
+    pose = {"export_pose_validity": "good", "generation_template_safe": True, "motion_strength_score": 0.9, "semantic_motion_likely_valid": True}
+    controller = {
+        "controller_validity_status": "invalid" if orientation_status == "invalid" else "valid",
+        "controller_validity_score": 0.1 if orientation_status == "invalid" else 0.95,
+        "generation_pose_valid": orientation_status != "invalid",
+        "missing_foot_controllers": anchor_missing,
+        "foot_controller_outlier": False,
+    }
+    anchor = {
+        "pose_anchor_completeness_score": 0.65 if anchor_missing else 1.0,
+        "generation_pose_anchor_safe": not anchor_missing,
+        "missing_foot_controllers": anchor_missing,
+        "missing_knee_controllers": False,
+        "pose_anchor_incomplete": anchor_missing,
+        "missing_required_anchor_controllers": ["left_foot", "right_foot"] if anchor_missing else [],
+        "foot_controllers_present": not anchor_missing,
+        "knee_controllers_present": True,
+    }
+    orientation = {
+        "orientation_validity_status": orientation_status,
+        "orientation_validity_score": 0.1 if orientation_status == "invalid" else 0.95,
+        "controller_rotation_invalid": orientation_status == "invalid",
+        "controller_twist_invalid": orientation_status == "invalid",
+        "twisted_controller_names": ["lFootControl"] if orientation_status == "invalid" else [],
+        "foot_rotation_outlier": orientation_status == "invalid",
+    }
+    return score_window_v8(feature, body, rel_match, rel_feature, traj, {"duration_seconds": 4.0}, rider, pose, controller, anchor, orientation)
+
+
+def test_orientation_invalid_lowers_generation_not_semantic_score():
+    row = _v8_score(orientation_status="invalid")
+    assert row["final_semantic_cowgirl_score_v8"] >= 0.5
+    assert row["final_generation_candidate_score_v8"] < 0.1
+    assert row["semantic_cowgirl_orientation_invalid"]
+    assert not row["semantic_cowgirl_generation_safe"]
+
+
+def test_anchor_complete_but_orientation_invalid_generation_unsafe():
+    row = _v8_score(orientation_status="invalid", anchor_missing=False)
+    assert not row["pose_anchor_incomplete"]
+    assert row["controller_rotation_invalid"]
+    assert row["generation_pose_valid"] is False
+
+
+def test_standing_hand_head_motion_excluded_from_generation_safe_cowgirl():
+    row = _v8_score(orientation_status="valid", standing=True)
+    assert row["standing_gesture_false_positive"]
+    assert not row["semantic_cowgirl_generation_safe"]
+    assert row["final_generation_candidate_score_v8"] == 0.0
+
+
+def test_pose_export_orientation_invalid_blocks_generation_only():
+    review = {"review_id": "review_002", "window_id": "w", "sample_id": "s", "has_timeline_export": True, "duration_seconds": 4.0}
+    answer = {"user_verdict": "partially_correct", "actual_labels": ["cowgirl_true_segment", "controller_rotation_invalid", "controller_twist_invalid"]}
+    relative = {"safe_for_learning": True, "controllers": ["hipControl", "chestControl"], "bodyparts": ["hip", "chest"], "teleport_risk": "low", "moving_controller_count_relative": 2, "stripped_track_count": 0, "coordinate_space_assumptions": {"allowed_body_controller_count": 2}}
+    body = {"body_motion_quality": "good_body_motion", "meaningful_motion_duration_ratio": 1.0, "active_bodypart_count_above_threshold": 2}
+    row = pose_export_validity_for_review_item(review, answer, {}, relative, body)
+    assert row["semantic_motion_likely_valid"] is True
+    assert row["controller_rotation_invalid"]
+    assert row["generation_template_safe"] is False
+
+
+def test_semantic_review_v10_includes_orientation_validity_fields(tmp_path):
+    from tests.test_semantic_review import _make_run
+
+    run = _make_run(tmp_path)
+    (run / "relative_motion").mkdir(parents=True, exist_ok=True)
+    rel_rows = []
+    traj_rows = []
+    match_rows = []
+    rider_rows = []
+    pose_rows = []
+    controller_rows = []
+    anchor_rows = []
+    orientation_rows = []
+    score_rows = []
+    cats = ["safe", "safe", "safe", "safe", "orient", "anchor", "standing", "receiver", "intro", "unknown", "fallback", "fallback"]
+    for idx, cat in enumerate(cats):
+        wid = f"win_{idx:02d}"
+        receiver = cat == "receiver"
+        orient = cat == "orient"
+        anchor = cat == "anchor"
+        standing = cat == "standing"
+        rel_rows.append({"window_id": wid, "feature_values": {"safe_for_learning": 1.0}, "feature_quality": {"teleport_risk": "low"}})
+        traj_rows.append({"window_id": wid, "trajectory_shape_classification": "oval_grind", "feature_values": {"oval_path_score": 0.8, "ellipse_fit_score": 0.8, "closed_loop_ratio": 0.7, "grind_pattern_score": 0.8, "transition_path_score": 0.1, "jitter_score": 0.1}})
+        match_rows.append({"window_id": wid, "cowgirl_relative_score": 0.85, "cowgirl_grind_trajectory_score": 0.8, "safe_for_learning": True})
+        rider_rows.append({"window_id": wid, "rider_receiver_status": "likely_receiver_body_response" if receiver else "likely_active_rider", "active_rider_score": 0.8, "receiver_body_response_score": 0.8 if receiver else 0.05})
+        pose_rows.append({"window_id": wid, "export_pose_validity": "export_unavailable" if cat == "unknown" else "good", "generation_template_safe": cat == "safe", "motion_strength_score": 0.9, "semantic_motion_likely_valid": not receiver, "controller_rotation_invalid": orient})
+        controller_rows.append({"window_id": wid, "controller_validity_status": "invalid" if orient else "valid", "controller_validity_score": 0.1 if orient else 0.95, "generation_pose_valid": not orient, "missing_foot_controllers": anchor, "controller_rotation_invalid": orient, "orientation_validity_status": "invalid" if orient else "valid", "orientation_validity_score": 0.1 if orient else 0.95})
+        anchor_rows.append({"window_id": wid, "pose_anchor_completeness_score": 0.65 if anchor else 1.0, "generation_pose_anchor_safe": not anchor, "missing_foot_controllers": anchor, "missing_knee_controllers": False, "pose_anchor_incomplete": anchor, "missing_required_anchor_controllers": ["left_foot", "right_foot"] if anchor else [], "foot_controllers_present": not anchor, "knee_controllers_present": True})
+        orientation_rows.append({"window_id": wid, "orientation_validity_status": "invalid" if orient else "valid", "orientation_validity_score": 0.1 if orient else 0.95, "controller_rotation_invalid": orient, "controller_twist_invalid": orient, "twisted_controller_names": ["lFootControl"] if orient else [], "foot_rotation_outlier": orient})
+        score_rows.append({
+            "window_id": wid,
+            "duration_seconds": 4.0,
+            "semantic_cowgirl_candidate_v8": cat in {"safe", "orient", "anchor", "intro"},
+            "semantic_cowgirl_generation_safe": cat == "safe",
+            "semantic_cowgirl_orientation_invalid": orient,
+            "semantic_cowgirl_anchor_incomplete": anchor,
+            "standing_gesture_false_positive": standing,
+            "receiver_response_negative": receiver,
+            "cowgirl_context_intro_low_motion": cat == "intro",
+            "unknown_or_unusable": cat == "unknown",
+            "export_unavailable_for_generation": cat == "unknown",
+            "final_semantic_cowgirl_score_v8": 0.9 - idx * 0.02,
+            "final_generation_candidate_score_v8": 0.8 if cat == "safe" else 0.0,
+            "orientation_validity_status": "invalid" if orient else "valid",
+            "orientation_validity_score": 0.1 if orient else 0.95,
+            "controller_rotation_invalid": orient,
+            "controller_twist_invalid": orient,
+            "twisted_controller_names": ["lFootControl"] if orient else [],
+            "pose_anchor_completeness_score": 0.65 if anchor else 1.0,
+            "missing_foot_controllers": anchor,
+            "missing_required_anchor_controllers": ["left_foot", "right_foot"] if anchor else [],
+            "foot_controllers_present": not anchor,
+            "knee_controllers_present": True,
+        })
+    write_jsonl(run / "relative_motion" / "relative_motion_features.jsonl", rel_rows)
+    write_jsonl(run / "relative_motion" / "trajectory_shape_features.jsonl", traj_rows)
+    write_jsonl(run / "relative_motion" / "relative_reference_matches.jsonl", match_rows)
+    write_jsonl(run / "audits" / "rider_receiver_scores_v1.jsonl", rider_rows)
+    write_jsonl(run / "audits" / "pose_export_validity.jsonl", pose_rows)
+    write_jsonl(run / "audits" / "controller_validity.jsonl", controller_rows)
+    write_jsonl(run / "audits" / "pose_anchor_completeness.jsonl", anchor_rows)
+    write_jsonl(run / "audits" / "controller_orientation_validity.jsonl", orientation_rows)
+    write_jsonl(run / "audits" / "cowgirl_candidate_scores_v8.jsonl", score_rows)
+    out = run / "audits" / "semantic_review_010_v10"
+    export_semantic_review_010(run, out, count=10, attempt_timeline_export=False, export_mode="motion_plus_static_anchors", use_cowgirl_candidate_score_v8=True, use_controller_orientation_validity=True, use_pose_anchor_completeness=True, use_controller_validity=True)
+    rows = load_jsonl(out / "semantic_review_010.jsonl")
+    categories = {r["category"] for r in rows}
+    assert "semantic_cowgirl_orientation_invalid" in categories
+    assert "standing_gesture_false_positive" in categories
+    assert all("controller_orientation_validity" in r["evidence"] for r in rows)
+    safe = [r for r in rows if r["category"] == "semantic_cowgirl_generation_safe"]
+    assert safe
+    assert all(not r["system_semantic_guess"]["controller_rotation_invalid"] for r in safe)
+    assert all(not r["system_semantic_guess"]["missing_foot_controllers"] for r in safe)

@@ -237,6 +237,55 @@ def score_cowgirl_candidates_v7(
     return rows
 
 
+def score_cowgirl_candidates_v8(
+    run_dir: str | Path,
+    relative_reference_matches: str | Path,
+    relative_features: str | Path,
+    trajectory_features: str | Path,
+    body_quality: str | Path,
+    rider_receiver_scores: str | Path,
+    pose_export_validity: str | Path,
+    controller_validity: str | Path,
+    pose_anchor_completeness: str | Path,
+    controller_orientation_validity: str | Path,
+    features: str | Path,
+    out_jsonl: str | Path,
+    report: str | Path,
+) -> list[dict[str, Any]]:
+    run = Path(run_dir)
+    windows = {r.get("window_id"): r for r in load_jsonl(run / "semantic" / "movement_windows.jsonl") if r.get("window_id")}
+    rel_matches = {r.get("window_id"): r for r in load_jsonl(relative_reference_matches) if r.get("window_id")}
+    rel_features = {r.get("window_id"): r for r in load_jsonl(relative_features) if r.get("window_id")}
+    trajectories = {r.get("window_id"): r for r in load_jsonl(trajectory_features) if r.get("window_id")}
+    body = {r.get("window_id"): r for r in load_jsonl(body_quality) if r.get("window_id")}
+    rider_receiver = {r.get("window_id"): r for r in load_jsonl(rider_receiver_scores) if r.get("window_id")}
+    pose_validity = {r.get("window_id"): r for r in load_jsonl(pose_export_validity) if r.get("window_id")}
+    controller = {r.get("window_id"): r for r in load_jsonl(controller_validity) if r.get("window_id")}
+    anchors = {r.get("window_id"): r for r in load_jsonl(pose_anchor_completeness) if r.get("window_id")}
+    orientations = {r.get("window_id"): r for r in load_jsonl(controller_orientation_validity) if r.get("window_id")}
+    feature_rows = {r.get("window_id"): r for r in load_jsonl(features) if r.get("window_id")}
+    rows = [
+        score_window_v8(
+            feature_rows[wid],
+            body.get(wid, {}),
+            rel_matches.get(wid, {}),
+            rel_features.get(wid, {}),
+            trajectories.get(wid, {}),
+            windows.get(wid, {}),
+            rider_receiver.get(wid, {}),
+            pose_validity.get(wid, {}),
+            controller.get(wid, {}),
+            anchors.get(wid, {}),
+            orientations.get(wid, {}),
+        )
+        for wid in feature_rows
+    ]
+    rows.sort(key=lambda r: float(r.get("final_semantic_cowgirl_score_v8") or 0.0), reverse=True)
+    write_jsonl(out_jsonl, rows)
+    _write_report_v8(rows, report)
+    return rows
+
+
 def score_window(feature_row: dict[str, Any], body: dict[str, Any], match: dict[str, Any], window: dict[str, Any]) -> dict[str, Any]:
     values = feature_row.get("feature_values", {}) or {}
     duration = _num(window.get("duration_seconds") or window.get("window_size_seconds") or 0.0)
@@ -806,6 +855,150 @@ def score_window_v7(
     return out
 
 
+def score_window_v8(
+    feature_row: dict[str, Any],
+    body: dict[str, Any],
+    relative_match: dict[str, Any],
+    relative_feature: dict[str, Any],
+    trajectory: dict[str, Any],
+    window: dict[str, Any],
+    rider_receiver: dict[str, Any] | None = None,
+    pose_validity: dict[str, Any] | None = None,
+    controller_validity: dict[str, Any] | None = None,
+    pose_anchor: dict[str, Any] | None = None,
+    orientation_validity: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    v7 = score_window_v7(feature_row, body, relative_match, relative_feature, trajectory, window, rider_receiver, pose_validity, controller_validity, pose_anchor)
+    pose_validity = pose_validity or {}
+    controller_validity = controller_validity or {}
+    orientation_validity = orientation_validity or controller_validity.get("controller_orientation_validity") or {}
+    semantic = _num(v7.get("final_semantic_cowgirl_score_v7"))
+    clean = _num(v7.get("final_clean_motion_score_v7"))
+    generation_v7 = _num(v7.get("final_generation_candidate_score_v7"))
+    anchor_score = _num(v7.get("pose_anchor_completeness_score"))
+    controller_score = _num(v7.get("controller_validity_score"))
+    orientation_status = str(orientation_validity.get("orientation_validity_status") or controller_validity.get("orientation_validity_status") or pose_validity.get("orientation_validity_status") or "unknown")
+    orientation_score = _num(orientation_validity.get("orientation_validity_score") or controller_validity.get("orientation_validity_score") or pose_validity.get("orientation_validity_score"))
+    if not orientation_validity and not controller_validity.get("orientation_validity_score"):
+        orientation_score = 0.35
+    controller_rotation_invalid = bool(
+        orientation_validity.get("controller_rotation_invalid")
+        or controller_validity.get("controller_rotation_invalid")
+        or pose_validity.get("controller_rotation_invalid")
+        or orientation_status == "invalid"
+    )
+    controller_twist_invalid = bool(
+        orientation_validity.get("controller_twist_invalid")
+        or controller_validity.get("controller_twist_invalid")
+        or pose_validity.get("controller_twist_invalid")
+        or controller_rotation_invalid
+    )
+    twisted_controller_names = list(
+        orientation_validity.get("twisted_controller_names")
+        or controller_validity.get("twisted_controller_names")
+        or pose_validity.get("twisted_controller_names")
+        or []
+    )
+    if controller_rotation_invalid:
+        orientation_status = "invalid"
+        if not twisted_controller_names:
+            twisted_controller_names = ["unknown_controller_rotation"]
+    foot_rotation_outlier = bool(
+        orientation_validity.get("foot_rotation_outlier")
+        or controller_validity.get("foot_rotation_outlier")
+        or pose_validity.get("foot_rotation_outlier")
+    )
+    missing_anchor = bool(v7.get("pose_anchor_incomplete") or v7.get("missing_foot_controllers") or v7.get("missing_knee_controllers"))
+    receiver = bool(v7.get("receiver_response_negative") or v7.get("likely_receiver_response"))
+    export_unavailable = bool(v7.get("export_unavailable_for_generation"))
+    context_intro = bool(v7.get("cowgirl_context_intro_low_motion"))
+    head_or_bj = bool(v7.get("likely_head_or_bj_false_positive"))
+    body_quality = str(body.get("body_motion_quality") or "")
+    minimal_head_or_hand = bool(body.get("minimal_head_motion_only") or body.get("minimal_hand_jitter_only"))
+    movement_family = str((relative_match or {}).get("recommended_review_status") or "")
+    standing_gesture = bool(
+        head_or_bj
+        or minimal_head_or_hand
+        or movement_family in {"likely_isolated_gesture", "likely_not_cowgirl_head_or_bj"}
+        or (body_quality in {"static_or_micro_motion", "static_or_empty"} and semantic < 0.45)
+    )
+    generation_multiplier = min(_bounded(controller_score), _bounded(anchor_score), _bounded(orientation_score))
+    if controller_rotation_invalid:
+        generation_multiplier = min(generation_multiplier, 0.04)
+    elif orientation_status == "warning":
+        generation_multiplier = min(generation_multiplier, 0.45)
+    if standing_gesture:
+        generation_multiplier = 0.0
+    final_semantic = float(np.clip(semantic, 0.0, 1.0))
+    final_clean = float(np.clip(clean * (0.35 if context_intro else 1.0), 0.0, 1.0))
+    computed_generation = final_semantic * final_clean * generation_multiplier
+    final_generation = float(np.clip(min(generation_v7, computed_generation) if generation_v7 > 0.0 else computed_generation, 0.0, 1.0))
+    if controller_rotation_invalid or standing_gesture:
+        final_generation = float(np.clip(final_semantic * final_clean * generation_multiplier, 0.0, 1.0))
+    semantic_candidate = bool(v7.get("semantic_cowgirl_candidate_v7"))
+    generation_pose_valid = bool(
+        semantic_candidate
+        and final_generation >= 0.20
+        and v7.get("semantic_cowgirl_generation_safe")
+        and not controller_rotation_invalid
+        and not missing_anchor
+        and not receiver
+        and not export_unavailable
+        and not standing_gesture
+    )
+    semantic_orientation_invalid = bool(semantic_candidate and controller_rotation_invalid and not receiver)
+    semantic_anchor_incomplete = bool(semantic_candidate and missing_anchor and not controller_rotation_invalid and not receiver)
+    semantic_controller_outlier = bool(v7.get("semantic_cowgirl_controller_outlier") and not semantic_orientation_invalid)
+    classification = "unknown_or_unusable"
+    if generation_pose_valid:
+        classification = "semantic_cowgirl_generation_safe"
+    elif semantic_orientation_invalid:
+        classification = "semantic_cowgirl_orientation_invalid"
+    elif semantic_anchor_incomplete:
+        classification = "semantic_cowgirl_anchor_incomplete"
+    elif semantic_controller_outlier:
+        classification = "semantic_cowgirl_controller_outlier"
+    elif context_intro:
+        classification = "cowgirl_context_intro_low_motion"
+    elif standing_gesture:
+        classification = "standing_gesture_false_positive"
+    elif receiver:
+        classification = "receiver_response_negative"
+    elif semantic_candidate:
+        classification = "semantic_cowgirl_generation_safe" if not missing_anchor and not controller_rotation_invalid else "semantic_cowgirl_anchor_incomplete"
+    out = dict(v7)
+    out.update(
+        {
+            "final_semantic_cowgirl_score_v8": round(final_semantic, 6),
+            "final_clean_motion_score_v8": round(final_clean, 6),
+            "final_generation_candidate_score_v8": round(final_generation, 6),
+            "pose_anchor_completeness_score": round(float(anchor_score), 6),
+            "controller_validity_score": round(float(controller_score), 6),
+            "orientation_validity_score": round(float(orientation_score), 6),
+            "orientation_validity_status": orientation_status,
+            "controller_rotation_invalid": controller_rotation_invalid,
+            "controller_twist_invalid": controller_twist_invalid,
+            "twisted_controller_names": twisted_controller_names,
+            "foot_rotation_outlier": foot_rotation_outlier,
+            "generation_pose_valid": generation_pose_valid,
+            "semantic_cowgirl_candidate_v8": semantic_candidate,
+            "semantic_cowgirl_generation_safe": generation_pose_valid,
+            "semantic_cowgirl_anchor_incomplete": semantic_anchor_incomplete,
+            "semantic_cowgirl_orientation_invalid": semantic_orientation_invalid,
+            "semantic_cowgirl_controller_outlier": semantic_controller_outlier,
+            "standing_gesture_false_positive": standing_gesture,
+            "cowgirl_context_intro_low_motion": context_intro,
+            "receiver_response_negative": receiver,
+            "unknown_or_unusable": bool(classification == "unknown_or_unusable" or export_unavailable),
+            "cowgirl_v8_category": classification,
+            "controller_orientation_validity": orientation_validity,
+            "warning": "V8 separates semantic Cowgirl from pose-anchor completeness, controller positions, and controller orientation/twist validity.",
+            "is_human_ground_truth": False,
+        }
+    )
+    return out
+
+
 def _write_report(rows: list[dict[str, Any]], report: str | Path) -> None:
     target = Path(report)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -1040,6 +1233,60 @@ def _write_report_v7(rows: list[dict[str, Any]], report: str | Path) -> None:
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _write_report_v8(rows: list[dict[str, Any]], report: str | Path) -> None:
+    target = Path(report)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    semantic = [r for r in rows if r.get("semantic_cowgirl_candidate_v8")]
+    generation = [r for r in rows if r.get("semantic_cowgirl_generation_safe")]
+    anchor_incomplete = [r for r in rows if r.get("semantic_cowgirl_anchor_incomplete")]
+    orientation_invalid = [r for r in rows if r.get("semantic_cowgirl_orientation_invalid")]
+    controller_outlier = [r for r in rows if r.get("semantic_cowgirl_controller_outlier")]
+    standing = [r for r in rows if r.get("standing_gesture_false_positive")]
+    category_counts = Counter(r.get("cowgirl_v8_category") for r in rows)
+    orientation_counts = Counter(r.get("orientation_validity_status") for r in rows)
+    lines = [
+        "# Cowgirl Candidate Score V8 Report",
+        "",
+        "V8 adds controller orientation/twist validity. Orientation invalidity lowers generation safety, not semantic Cowgirl evidence.",
+        "",
+        f"- Windows scored: {len(rows)}",
+        f"- Semantic Cowgirl total: {len(semantic)}",
+        f"- Generation-safe Cowgirl total: {len(generation)}",
+        f"- Anchor-incomplete Cowgirl total: {len(anchor_incomplete)}",
+        f"- Orientation-invalid Cowgirl total: {len(orientation_invalid)}",
+        f"- Controller-outlier Cowgirl total: {len(controller_outlier)}",
+        f"- Standing/gesture false positives: {len(standing)}",
+        "",
+        "## V8 Categories",
+        "",
+    ]
+    lines.extend(f"- `{k}`: {v}" for k, v in category_counts.most_common()) if category_counts else lines.append("- None")
+    lines.extend(["", "## Orientation Validity", ""])
+    lines.extend(f"- `{k}`: {v}" for k, v in orientation_counts.most_common()) if orientation_counts else lines.append("- None")
+    lines.extend(["", "## Generation-Safe Cowgirl Examples", ""])
+    for row in sorted(generation, key=lambda r: float(r.get("final_generation_candidate_score_v8") or 0.0), reverse=True)[:20]:
+        lines.append(
+            f"- `{row.get('window_id')}` semantic={row.get('final_semantic_cowgirl_score_v8')} "
+            f"generation={row.get('final_generation_candidate_score_v8')} orientation={row.get('orientation_validity_status')}"
+        )
+    if not generation:
+        lines.append("- None")
+    lines.extend(["", "## Review-002-Like Orientation Invalid Examples", ""])
+    for row in sorted(orientation_invalid, key=lambda r: float(r.get("final_semantic_cowgirl_score_v8") or 0.0), reverse=True)[:20]:
+        lines.append(
+            f"- `{row.get('window_id')}` semantic={row.get('final_semantic_cowgirl_score_v8')} "
+            f"twisted={row.get('twisted_controller_names')} orientation={row.get('orientation_validity_score')}"
+        )
+    if not orientation_invalid:
+        lines.append("- None")
+    lines.extend(["", "## Review-004/005-Like Anchor Incomplete Examples", ""])
+    for row in sorted(anchor_incomplete, key=lambda r: float(r.get("final_semantic_cowgirl_score_v8") or 0.0), reverse=True)[:20]:
+        lines.append(f"- `{row.get('window_id')}` semantic={row.get('final_semantic_cowgirl_score_v8')} missing={row.get('missing_required_anchor_controllers')}")
+    if not anchor_incomplete:
+        lines.append("- None")
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def _dedupe(items: list[str]) -> list[str]:
     out = []
     for item in items:
@@ -1054,3 +1301,7 @@ def _num(value: Any) -> float:
         return val if np.isfinite(val) else 0.0
     except Exception:
         return 0.0
+
+
+def _bounded(value: Any) -> float:
+    return float(np.clip(_num(value), 0.0, 1.0))

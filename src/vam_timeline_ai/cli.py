@@ -77,6 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     semantic_review.add_argument("--use-cowgirl-candidate-score-v5", default="false")
     semantic_review.add_argument("--use-cowgirl-candidate-score-v6", default="false")
     semantic_review.add_argument("--use-cowgirl-candidate-score-v7", default="false")
+    semantic_review.add_argument("--use-cowgirl-candidate-score-v8", default="false")
     semantic_review.add_argument("--use-rider-receiver-discrimination", default="false")
     semantic_review.add_argument("--use-relative-motion-features", default="false")
     semantic_review.add_argument("--use-trajectory-shape-features", default="false")
@@ -84,6 +85,7 @@ def build_parser() -> argparse.ArgumentParser:
     semantic_review.add_argument("--use-pose-export-validity", default="false")
     semantic_review.add_argument("--use-controller-validity", default="false")
     semantic_review.add_argument("--use-pose-anchor-completeness", default="false")
+    semantic_review.add_argument("--use-controller-orientation-validity", default="false")
 
     semantic_summary = subparsers.add_parser("summarize-semantic-review-010", help="Summarize user answers for the 10-item semantic review.")
     semantic_summary.add_argument("--answers", required=True)
@@ -218,6 +220,7 @@ def build_parser() -> argparse.ArgumentParser:
     pose_export.add_argument("--body-quality", required=True)
     pose_export.add_argument("--controller-validity", default=None)
     pose_export.add_argument("--pose-anchor-completeness", default=None)
+    pose_export.add_argument("--controller-orientation-validity", default=None)
     pose_export.add_argument("--out-jsonl", required=True)
     pose_export.add_argument("--report", required=True)
 
@@ -236,8 +239,18 @@ def build_parser() -> argparse.ArgumentParser:
     controller_validity.add_argument("--sample-index", required=True)
     controller_validity.add_argument("--controller-map", required=True)
     controller_validity.add_argument("--pose-anchor-completeness", default=None)
+    controller_validity.add_argument("--controller-orientation-validity", default=None)
     controller_validity.add_argument("--out-jsonl", required=True)
     controller_validity.add_argument("--report", required=True)
+
+    orientation_validity = subparsers.add_parser("audit-controller-orientation-validity", help="Audit controller rotation/orientation twist validity for generation safety.")
+    orientation_validity.add_argument("--run-dir", required=True)
+    orientation_validity.add_argument("--relative-index", required=True)
+    orientation_validity.add_argument("--sample-index", required=True)
+    orientation_validity.add_argument("--controller-map", required=True)
+    orientation_validity.add_argument("--pose-anchor-completeness", default=None)
+    orientation_validity.add_argument("--out-jsonl", required=True)
+    orientation_validity.add_argument("--report", required=True)
 
     cowgirl_score_v5 = subparsers.add_parser("score-cowgirl-candidates-v5", help="Score semantic Cowgirl separately from generation/export usability.")
     cowgirl_score_v5.add_argument("--run-dir", required=True)
@@ -277,6 +290,21 @@ def build_parser() -> argparse.ArgumentParser:
     cowgirl_score_v7.add_argument("--features", required=True)
     cowgirl_score_v7.add_argument("--out-jsonl", required=True)
     cowgirl_score_v7.add_argument("--report", required=True)
+
+    cowgirl_score_v8 = subparsers.add_parser("score-cowgirl-candidates-v8", help="Score Cowgirl candidates with anchor, controller, and orientation validity.")
+    cowgirl_score_v8.add_argument("--run-dir", required=True)
+    cowgirl_score_v8.add_argument("--relative-reference-matches", required=True)
+    cowgirl_score_v8.add_argument("--relative-features", required=True)
+    cowgirl_score_v8.add_argument("--trajectory-features", required=True)
+    cowgirl_score_v8.add_argument("--body-quality", required=True)
+    cowgirl_score_v8.add_argument("--rider-receiver-scores", required=True)
+    cowgirl_score_v8.add_argument("--pose-export-validity", required=True)
+    cowgirl_score_v8.add_argument("--controller-validity", required=True)
+    cowgirl_score_v8.add_argument("--pose-anchor-completeness", required=True)
+    cowgirl_score_v8.add_argument("--controller-orientation-validity", required=True)
+    cowgirl_score_v8.add_argument("--features", required=True)
+    cowgirl_score_v8.add_argument("--out-jsonl", required=True)
+    cowgirl_score_v8.add_argument("--report", required=True)
 
     cmap = subparsers.add_parser("discover-controller-map", help="Discover controller names and conservative body-part mapping.")
     cmap.add_argument("--sample-index", required=True)
@@ -926,7 +954,7 @@ def cmd_score_cowgirl_candidates_v4(args: argparse.Namespace) -> int:
 def cmd_audit_pose_export_validity(args: argparse.Namespace) -> int:
     from vam_timeline_ai.audits.pose_export_validity import audit_pose_export_validity
 
-    rows = audit_pose_export_validity(args.run_dir, args.review_dir, args.sample_index, args.relative_index, args.body_quality, args.out_jsonl, args.report, args.controller_validity, args.pose_anchor_completeness)
+    rows = audit_pose_export_validity(args.run_dir, args.review_dir, args.sample_index, args.relative_index, args.body_quality, args.out_jsonl, args.report, args.controller_validity, args.pose_anchor_completeness, args.controller_orientation_validity)
     safe = sum(1 for row in rows if row.get("generation_template_safe"))
     print(f"Pose/export validity audit written: {args.out_jsonl}")
     print(f"Rows: {len(rows)}; generation_template_safe: {safe}")
@@ -947,11 +975,30 @@ def cmd_audit_pose_anchor_completeness(args: argparse.Namespace) -> int:
 def cmd_audit_controller_validity(args: argparse.Namespace) -> int:
     from vam_timeline_ai.audits.controller_validity import audit_controller_validity
 
-    rows = audit_controller_validity(args.run_dir, args.relative_index, args.sample_index, args.controller_map, args.out_jsonl, args.report, args.pose_anchor_completeness)
+    rows = audit_controller_validity(args.run_dir, args.relative_index, args.sample_index, args.controller_map, args.out_jsonl, args.report, args.pose_anchor_completeness, args.controller_orientation_validity)
     foot = sum(1 for row in rows if row.get("foot_controller_outlier"))
     invalid = sum(1 for row in rows if row.get("controller_validity_status") == "invalid")
     print(f"Controller validity audit written: {args.out_jsonl}")
     print(f"Rows: {len(rows)}; invalid: {invalid}; foot_outliers: {foot}")
+    return 0
+
+
+def cmd_audit_controller_orientation_validity(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.controller_orientation_validity import audit_controller_orientation_validity
+
+    rows = audit_controller_orientation_validity(
+        args.run_dir,
+        args.relative_index,
+        args.sample_index,
+        args.controller_map,
+        args.pose_anchor_completeness,
+        args.out_jsonl,
+        args.report,
+    )
+    invalid = sum(1 for row in rows if row.get("orientation_validity_status") == "invalid")
+    foot = sum(1 for row in rows if row.get("foot_rotation_outlier"))
+    print(f"Controller orientation validity audit written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; invalid: {invalid}; foot_rotation_outliers: {foot}")
     return 0
 
 
@@ -1023,6 +1070,32 @@ def cmd_score_cowgirl_candidates_v7(args: argparse.Namespace) -> int:
     anchor_incomplete = sum(1 for row in rows if row.get("semantic_cowgirl_anchor_incomplete"))
     print(f"Cowgirl candidate scores v7 written: {args.out_jsonl}")
     print(f"Rows: {len(rows)}; semantic: {semantic}; generation_safe: {generation}; anchor_incomplete: {anchor_incomplete}")
+    return 0
+
+
+def cmd_score_cowgirl_candidates_v8(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_cowgirl_candidates_v8
+
+    rows = score_cowgirl_candidates_v8(
+        args.run_dir,
+        args.relative_reference_matches,
+        args.relative_features,
+        args.trajectory_features,
+        args.body_quality,
+        args.rider_receiver_scores,
+        args.pose_export_validity,
+        args.controller_validity,
+        args.pose_anchor_completeness,
+        args.controller_orientation_validity,
+        args.features,
+        args.out_jsonl,
+        args.report,
+    )
+    semantic = sum(1 for row in rows if row.get("semantic_cowgirl_candidate_v8"))
+    generation = sum(1 for row in rows if row.get("semantic_cowgirl_generation_safe"))
+    orientation_invalid = sum(1 for row in rows if row.get("semantic_cowgirl_orientation_invalid"))
+    print(f"Cowgirl candidate scores v8 written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; semantic: {semantic}; generation_safe: {generation}; orientation_invalid: {orientation_invalid}")
     return 0
 
 
@@ -1595,6 +1668,7 @@ def cmd_export_semantic_review_010(args: argparse.Namespace) -> int:
         use_cowgirl_candidate_score_v5=_arg_bool(args.use_cowgirl_candidate_score_v5),
         use_cowgirl_candidate_score_v6=_arg_bool(args.use_cowgirl_candidate_score_v6),
         use_cowgirl_candidate_score_v7=_arg_bool(args.use_cowgirl_candidate_score_v7),
+        use_cowgirl_candidate_score_v8=_arg_bool(args.use_cowgirl_candidate_score_v8),
         use_rider_receiver_discrimination=_arg_bool(args.use_rider_receiver_discrimination),
         use_relative_motion_features=_arg_bool(args.use_relative_motion_features),
         use_trajectory_shape_features=_arg_bool(args.use_trajectory_shape_features),
@@ -1602,6 +1676,7 @@ def cmd_export_semantic_review_010(args: argparse.Namespace) -> int:
         use_pose_export_validity=_arg_bool(args.use_pose_export_validity),
         use_controller_validity=_arg_bool(args.use_controller_validity),
         use_pose_anchor_completeness=_arg_bool(args.use_pose_anchor_completeness),
+        use_controller_orientation_validity=_arg_bool(args.use_controller_orientation_validity),
     )
     print(f"Semantic review 010 written: {args.out_dir}")
     print(f"Review items: {summary['review_items']}; categories={summary['category_distribution']}")
@@ -1712,12 +1787,16 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_audit_pose_anchor_completeness(args)
     if args.command == "audit-controller-validity":
         return cmd_audit_controller_validity(args)
+    if args.command == "audit-controller-orientation-validity":
+        return cmd_audit_controller_orientation_validity(args)
     if args.command == "score-cowgirl-candidates-v5":
         return cmd_score_cowgirl_candidates_v5(args)
     if args.command == "score-cowgirl-candidates-v6":
         return cmd_score_cowgirl_candidates_v6(args)
     if args.command == "score-cowgirl-candidates-v7":
         return cmd_score_cowgirl_candidates_v7(args)
+    if args.command == "score-cowgirl-candidates-v8":
+        return cmd_score_cowgirl_candidates_v8(args)
     if args.command == "discover-controller-map":
         return cmd_discover_controller_map(args)
     if args.command == "extract-cowgirl-features-v1":
