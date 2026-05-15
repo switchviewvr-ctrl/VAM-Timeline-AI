@@ -396,6 +396,64 @@ def score_cowgirl_candidates_v10(
     return rows
 
 
+def score_cowgirl_candidates_v11(
+    run_dir: str | Path,
+    relative_reference_matches: str | Path,
+    relative_features: str | Path,
+    trajectory_features: str | Path,
+    body_quality: str | Path,
+    rider_receiver_scores: str | Path,
+    pose_export_validity: str | Path,
+    controller_validity: str | Path,
+    pose_anchor_completeness: str | Path,
+    controller_orientation_validity: str | Path,
+    controller_distance_validity: str | Path,
+    cowgirl_core_controllers: str | Path,
+    bj_oral_domain: str | Path,
+    features: str | Path,
+    out_jsonl: str | Path,
+    report: str | Path,
+) -> list[dict[str, Any]]:
+    run = Path(run_dir)
+    windows = {r.get("window_id"): r for r in load_jsonl(run / "semantic" / "movement_windows.jsonl") if r.get("window_id")}
+    rel_matches = {r.get("window_id"): r for r in load_jsonl(relative_reference_matches) if r.get("window_id")}
+    rel_features = {r.get("window_id"): r for r in load_jsonl(relative_features) if r.get("window_id")}
+    trajectories = {r.get("window_id"): r for r in load_jsonl(trajectory_features) if r.get("window_id")}
+    body = {r.get("window_id"): r for r in load_jsonl(body_quality) if r.get("window_id")}
+    rider_receiver = {r.get("window_id"): r for r in load_jsonl(rider_receiver_scores) if r.get("window_id")}
+    pose_validity = {r.get("window_id"): r for r in load_jsonl(pose_export_validity) if r.get("window_id")}
+    controller = {r.get("window_id"): r for r in load_jsonl(controller_validity) if r.get("window_id")}
+    anchors = {r.get("window_id"): r for r in load_jsonl(pose_anchor_completeness) if r.get("window_id")}
+    orientations = {r.get("window_id"): r for r in load_jsonl(controller_orientation_validity) if r.get("window_id")}
+    distances = {r.get("window_id"): r for r in load_jsonl(controller_distance_validity) if r.get("window_id")}
+    core = {r.get("window_id"): r for r in load_jsonl(cowgirl_core_controllers) if r.get("window_id")}
+    bj_domain = {r.get("window_id"): r for r in load_jsonl(bj_oral_domain) if r.get("window_id")}
+    feature_rows = {r.get("window_id"): r for r in load_jsonl(features) if r.get("window_id")}
+    rows = [
+        score_window_v11(
+            feature_rows[wid],
+            body.get(wid, {}),
+            rel_matches.get(wid, {}),
+            rel_features.get(wid, {}),
+            trajectories.get(wid, {}),
+            windows.get(wid, {}),
+            rider_receiver.get(wid, {}),
+            pose_validity.get(wid, {}),
+            controller.get(wid, {}),
+            anchors.get(wid, {}),
+            orientations.get(wid, {}),
+            distances.get(wid, {}),
+            core.get(wid, {}),
+            bj_domain.get(wid, {}),
+        )
+        for wid in feature_rows
+    ]
+    rows.sort(key=lambda r: float(r.get("final_semantic_cowgirl_score_v11") or 0.0), reverse=True)
+    write_jsonl(out_jsonl, rows)
+    _write_report_v11(rows, report)
+    return rows
+
+
 def score_window(feature_row: dict[str, Any], body: dict[str, Any], match: dict[str, Any], window: dict[str, Any]) -> dict[str, Any]:
     values = feature_row.get("feature_values", {}) or {}
     duration = _num(window.get("duration_seconds") or window.get("window_size_seconds") or 0.0)
@@ -1376,6 +1434,161 @@ def score_window_v10(
     return out
 
 
+def score_window_v11(
+    feature_row: dict[str, Any],
+    body: dict[str, Any],
+    relative_match: dict[str, Any],
+    relative_feature: dict[str, Any],
+    trajectory: dict[str, Any],
+    window: dict[str, Any],
+    rider_receiver: dict[str, Any] | None = None,
+    pose_validity: dict[str, Any] | None = None,
+    controller_validity: dict[str, Any] | None = None,
+    pose_anchor: dict[str, Any] | None = None,
+    orientation_validity: dict[str, Any] | None = None,
+    distance_validity: dict[str, Any] | None = None,
+    core_controllers: dict[str, Any] | None = None,
+    bj_oral_domain: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    v10 = score_window_v10(
+        feature_row,
+        body,
+        relative_match,
+        relative_feature,
+        trajectory,
+        window,
+        rider_receiver,
+        pose_validity,
+        controller_validity,
+        pose_anchor,
+        orientation_validity,
+        distance_validity,
+        core_controllers,
+        bj_oral_domain,
+    )
+    core_controllers = core_controllers or {}
+    bj_oral_domain = bj_oral_domain or {}
+    semantic = _bounded(v10.get("final_semantic_cowgirl_score_v10"))
+    clean = _bounded(v10.get("final_clean_motion_score_v10"))
+    clean_evidence = max(clean, _bounded(v10.get("final_clean_cowgirl_score_v4")), _bounded(v10.get("clean_motion_strength_score")))
+    generation_v10 = _bounded(v10.get("final_generation_candidate_score_v10"))
+    core_status = str(core_controllers.get("core_gate_status") or "unknown")
+    core_override = bool(core_controllers.get("core_gate_can_be_overridden"))
+    core_reason = str(core_controllers.get("core_gate_override_reason") or "")
+    bj_family = bool(bj_oral_domain.get("bj_oral_motion_candidate") or bj_oral_domain.get("semantic_family") == "bj_oral")
+    bj_confidence = _bounded(bj_oral_domain.get("bj_oral_confidence") or bj_oral_domain.get("bj_oral_trap_confidence"))
+    receiver = bool(v10.get("receiver_response_negative"))
+    standing = bool(v10.get("standing_hand_head_negative") or v10.get("standing_gesture_false_positive"))
+    orientation_invalid = bool(v10.get("semantic_cowgirl_orientation_invalid"))
+    distance_invalid = bool(v10.get("semantic_cowgirl_distance_invalid"))
+    anchor_incomplete = bool(v10.get("semantic_cowgirl_anchor_incomplete"))
+    pose_invalid = bool(v10.get("semantic_cowgirl_pose_invalid"))
+    context_intro = bool(v10.get("cowgirl_context_intro_low_motion"))
+    semantic_candidate = bool(v10.get("semantic_cowgirl_candidate_v10"))
+    soft_fail_accepted = bool(
+        semantic_candidate
+        and core_status == "soft_fail"
+        and core_override
+        and semantic >= 0.45
+        and clean_evidence >= 0.35
+        and not bj_family
+        and not receiver
+        and not standing
+        and not orientation_invalid
+        and not distance_invalid
+    )
+    hard_fail = bool(core_status == "hard_fail" or (v10.get("semantic_cowgirl_core_controller_missing") and not soft_fail_accepted))
+    generation_safe = bool(
+        (v10.get("semantic_cowgirl_generation_safe") or soft_fail_accepted)
+        and not hard_fail
+        and not bj_family
+        and not receiver
+        and not standing
+        and not orientation_invalid
+        and not distance_invalid
+    )
+    final_generation = generation_v10
+    if soft_fail_accepted:
+        final_generation = max(final_generation, float(np.clip(semantic * clean_evidence * 0.55, 0.0, 1.0)))
+    if bj_family or hard_fail or receiver or standing:
+        final_generation = 0.0
+    subtype = _cowgirl_subtype(v10, trajectory)
+    if subtype == "oval_grind":
+        subtype = "grinding"
+    elif subtype == "circular_grind":
+        subtype = "circular_grind"
+    elif subtype in {"vertical_bounce", "forward_back_rock"}:
+        subtype = "riding"
+    category = "unknown_or_unusable"
+    semantic_family = "unknown"
+    excluded = False
+    preserve = False
+    if bj_family:
+        category = "not_cowgirl_bj_oral"
+        semantic_family = "bj_oral"
+        excluded = True
+        preserve = True
+    elif generation_safe and soft_fail_accepted:
+        category = "semantic_cowgirl_core_soft_fail_generation_safe"
+        semantic_family = "cowgirl"
+    elif generation_safe:
+        category = "semantic_cowgirl_generation_safe"
+        semantic_family = "cowgirl"
+    elif hard_fail and semantic_candidate:
+        category = "semantic_cowgirl_core_hard_fail"
+        semantic_family = "cowgirl"
+    elif anchor_incomplete:
+        category = "semantic_cowgirl_anchor_incomplete"
+        semantic_family = "cowgirl"
+    elif orientation_invalid:
+        category = "semantic_cowgirl_orientation_invalid"
+        semantic_family = "cowgirl"
+    elif distance_invalid:
+        category = "semantic_cowgirl_distance_invalid"
+        semantic_family = "cowgirl"
+    elif pose_invalid:
+        category = "semantic_cowgirl_pose_invalid"
+        semantic_family = "cowgirl"
+    elif context_intro:
+        category = "cowgirl_context_intro_low_motion"
+        semantic_family = "cowgirl"
+    elif standing:
+        category = "standing_hand_head_negative"
+        semantic_family = "hand_gesture" if body.get("minimal_hand_jitter_only") else "head_gesture"
+        preserve = True
+    elif receiver:
+        category = "receiver_response_negative"
+        semantic_family = "receiver_response"
+        preserve = True
+    out = dict(v10)
+    out.update(
+        {
+            "final_semantic_cowgirl_score_v11": round(float(semantic), 6),
+            "final_clean_motion_score_v11": round(float(clean), 6),
+            "final_generation_candidate_score_v11": round(float(final_generation), 6),
+            "semantic_family": semantic_family,
+            "excluded_from_cowgirl": excluded,
+            "preserve_for_future_dataset": preserve or semantic_family in {"cowgirl", "bj_oral", "receiver_response", "hand_gesture", "head_gesture"},
+            "cowgirl_subtype": subtype,
+            "bj_oral_confidence": round(float(bj_confidence), 6) if bj_family else None,
+            "core_gate_status": core_status,
+            "core_gate_can_be_overridden": core_override,
+            "core_gate_override_reason": core_reason,
+            "semantic_cowgirl_generation_safe": generation_safe,
+            "semantic_cowgirl_core_soft_fail_generation_safe": bool(category == "semantic_cowgirl_core_soft_fail_generation_safe"),
+            "semantic_cowgirl_core_hard_fail": bool(category == "semantic_cowgirl_core_hard_fail"),
+            "not_cowgirl_bj_oral": bool(category == "not_cowgirl_bj_oral"),
+            "bj_oral_motion_candidate": bj_family,
+            "bj_oral_generation_candidate": bool(bj_oral_domain.get("bj_oral_generation_candidate")),
+            "cowgirl_v11_category": category,
+            "bj_oral_domain": bj_oral_domain,
+            "warning": "V11 treats BJ/oral as a valid semantic family, excludes it from Cowgirl, and preserves it for future family-specific datasets.",
+            "is_human_ground_truth": False,
+        }
+    )
+    return out
+
+
 def _write_report(rows: list[dict[str, Any]], report: str | Path) -> None:
     target = Path(report)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -1769,6 +1982,55 @@ def _write_report_v10(rows: list[dict[str, Any]], report: str | Path) -> None:
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _write_report_v11(rows: list[dict[str, Any]], report: str | Path) -> None:
+    target = Path(report)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    generation = [r for r in rows if r.get("cowgirl_v11_category") in {"semantic_cowgirl_generation_safe", "semantic_cowgirl_core_soft_fail_generation_safe"}]
+    soft = [r for r in rows if r.get("semantic_cowgirl_core_soft_fail_generation_safe")]
+    hard = [r for r in rows if r.get("semantic_cowgirl_core_hard_fail")]
+    bj = [r for r in rows if r.get("semantic_family") == "bj_oral"]
+    categories = Counter(r.get("cowgirl_v11_category") for r in rows)
+    families = Counter(r.get("semantic_family") for r in rows)
+    subtypes = Counter(r.get("cowgirl_subtype") for r in generation)
+    lines = [
+        "# Cowgirl Candidate Score V11 Report",
+        "",
+        "V11 calibrates core-controller soft fails and treats BJ/oral as a valid semantic family. BJ/oral candidates are excluded from Cowgirl and preserved for future BJ/oral datasets.",
+        "",
+        f"- Windows scored: {len(rows)}",
+        f"- Generation-safe Cowgirl candidates: {len(generation)}",
+        f"- Core soft-fail accepted candidates: {len(soft)}",
+        f"- Core hard-fail rejected candidates: {len(hard)}",
+        f"- BJ/oral candidates excluded from Cowgirl: {len(bj)}",
+        f"- BJ/oral candidates preserved for future dataset: {sum(1 for r in bj if r.get('preserve_for_future_dataset'))}",
+        "",
+        "## Categories",
+        "",
+    ]
+    lines.extend(f"- `{k}`: {v}" for k, v in categories.most_common()) if categories else lines.append("- None")
+    lines.extend(["", "## Semantic Families", ""])
+    lines.extend(f"- `{k}`: {v}" for k, v in families.most_common()) if families else lines.append("- None")
+    lines.extend(["", "## Generation-Safe Cowgirl Subtypes", ""])
+    lines.extend(f"- `{k}`: {v}" for k, v in subtypes.most_common()) if subtypes else lines.append("- None")
+    lines.extend(["", "## Review-007-Like Core Soft-Fail Recoveries", ""])
+    for row in sorted(soft, key=lambda r: float(r.get("final_generation_candidate_score_v11") or 0.0), reverse=True)[:25]:
+        lines.append(
+            f"- `{row.get('window_id')}` generation={row.get('final_generation_candidate_score_v11')} "
+            f"reason={row.get('core_gate_override_reason')} scene=`{row.get('source_scene_file')}`"
+        )
+    if not soft:
+        lines.append("- None")
+    lines.extend(["", "## Review-010-Like BJ/Oral Preserved Candidates", ""])
+    for row in sorted(bj, key=lambda r: float(r.get("bj_oral_confidence") or 0.0), reverse=True)[:25]:
+        lines.append(
+            f"- `{row.get('window_id')}` confidence={row.get('bj_oral_confidence')} "
+            f"excluded_from_cowgirl={row.get('excluded_from_cowgirl')} scene=`{row.get('source_scene_file')}`"
+        )
+    if not bj:
+        lines.append("- None")
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def _dedupe(items: list[str]) -> list[str]:
     out = []
     for item in items:
@@ -1787,3 +2049,16 @@ def _num(value: Any) -> float:
 
 def _bounded(value: Any) -> float:
     return float(np.clip(_num(value), 0.0, 1.0))
+
+
+def _cowgirl_subtype(score: dict[str, Any], trajectory: dict[str, Any]) -> str:
+    shape = str(trajectory.get("trajectory_shape_classification") or score.get("trajectory_shape_classification") or "")
+    if score.get("likely_cowgirl_grinding") or "oval" in shape:
+        return "oval_grind"
+    if "circular" in shape:
+        return "circular_grind"
+    if score.get("likely_cowgirl_vertical_bounce") or "bounce" in shape:
+        return "vertical_bounce"
+    if score.get("likely_cowgirl_forward_back_rock") or "forward_back" in shape:
+        return "forward_back_rock"
+    return "unknown"

@@ -195,6 +195,54 @@ def test_semantic_review_does_not_create_manual_labels_or_infer_from_atom_names(
     assert not any(r.get("semantic_role") in {"rider", "receiver"} for r in rows)
 
 
+def test_semantic_review_v13_uses_candidate_db_v3_categories(tmp_path):
+    run = _make_run(tmp_path)
+    db = run / "datasets" / "cowgirl_candidate_db_v3.jsonl"
+    db.parent.mkdir(parents=True, exist_ok=True)
+    categories = [
+        "semantic_cowgirl_generation_safe",
+        "semantic_cowgirl_generation_safe",
+        "semantic_cowgirl_generation_safe",
+        "semantic_cowgirl_generation_safe",
+        "semantic_cowgirl_generation_safe",
+        "semantic_cowgirl_core_soft_fail_generation_safe",
+        "not_cowgirl_bj_oral",
+        "standing_hand_head_negative",
+        "receiver_response_negative",
+        "cowgirl_context_intro_low_motion",
+    ]
+    records = []
+    for idx, category in enumerate(categories):
+        wid = f"win_{idx:02d}"
+        family = "bj_oral" if category == "not_cowgirl_bj_oral" else "cowgirl" if "cowgirl" in category else "unknown"
+        records.append({
+            "window_id": wid,
+            "category": category,
+            "generation_safe": category in {"semantic_cowgirl_generation_safe", "semantic_cowgirl_core_soft_fail_generation_safe"},
+            "semantic_family": family,
+            "excluded_from_cowgirl": family == "bj_oral",
+            "preserve_for_future_dataset": True,
+            "semantic_cowgirl_score": 0.9 - idx * 0.01,
+            "generation_candidate_score": 0.8 - idx * 0.01,
+            "cowgirl_subtype": "riding",
+            "core_gate_status": "soft_fail" if category == "semantic_cowgirl_core_soft_fail_generation_safe" else "pass",
+            "core_gate_can_be_overridden": category == "semantic_cowgirl_core_soft_fail_generation_safe",
+            "core_gate_override_reason": "test override" if category == "semantic_cowgirl_core_soft_fail_generation_safe" else "",
+            "bj_oral_confidence": 0.8 if family == "bj_oral" else None,
+            "invalidity_reasons": [],
+        })
+    write_jsonl(db, records)
+    out = run / "audits" / "semantic_review_010_v13"
+    export_semantic_review_010(run, out, count=10, candidate_db=db, use_cowgirl_candidate_db=True, attempt_timeline_export=False, export_mode="motion_plus_static_anchors")
+    rows = load_jsonl(out / "semantic_review_010.jsonl")
+    assert len(rows) == 10
+    guess_by_category = {row["category"]: row["system_semantic_guess"] for row in rows}
+    assert "semantic_cowgirl_core_soft_fail_generation_safe" in guess_by_category
+    assert "not_cowgirl_bj_oral" in guess_by_category
+    assert guess_by_category["not_cowgirl_bj_oral"]["semantic_family"] == "bj_oral"
+    assert guess_by_category["not_cowgirl_bj_oral"]["excluded_from_cowgirl"] is True
+
+
 def test_semantic_review_v5_likely_positives_exclude_receiver_body_response(tmp_path):
     run = _make_run(tmp_path)
     (run / "references" / "handmade_animations").mkdir(parents=True, exist_ok=True)

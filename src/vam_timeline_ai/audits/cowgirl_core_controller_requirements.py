@@ -78,6 +78,17 @@ def cowgirl_core_controller_requirements_for_window(
             and int(body_quality.get("moving_bodypart_count") or 0) >= 2
         )
     lower_complete = bool(core_present and knees and feet)
+    body_quality_name = str(body_quality.get("body_motion_quality") or "")
+    meaningful_body_motion = bool(
+        body_quality_name in {"good_body_motion", "partial_body_motion"}
+        and not body_quality.get("static_or_micro_motion")
+        and int(body_quality.get("active_bodypart_count_above_threshold") or body_quality.get("moving_bodypart_count") or 0) >= 2
+    )
+    pose_valid_possible = bool(
+        pose_anchor.get("generation_pose_anchor_safe") is True
+        or pose_anchor.get("generation_pose_anchor_status") == "complete"
+        or lower_complete
+    )
     missing = []
     if not core_present:
         missing.append("hipControl_or_pelvisControl")
@@ -92,13 +103,45 @@ def cowgirl_core_controller_requirements_for_window(
     if not feet:
         missing.append("foot_controls")
     missing_core = bool(not core_present or not meaningful_core_motion)
-    if missing_core:
+    hand_head_only = bool((parts <= {"head", "left_hand", "right_hand", "left_elbow", "right_elbow"}) or (hands and not core_present and not (KNEE_PARTS & parts or FOOT_PARTS & parts)))
+    if hand_head_only:
+        core_gate_status = "hard_fail"
+        failure_mode = "hand_head_only_no_core_motion"
+        can_override = False
+        override_reason = ""
+    elif missing_core and not meaningful_body_motion:
+        core_gate_status = "hard_fail"
+        failure_mode = "missing_hip_or_pelvis" if not core_present else "missing_and_pose_invalid"
+        can_override = False
+        override_reason = ""
+    elif missing_core and (meaningful_body_motion or pose_valid_possible):
+        core_gate_status = "soft_fail"
+        failure_mode = "missing_but_pose_valid_possible" if pose_valid_possible else "missing_hip_or_pelvis"
+        can_override = True
+        override_reason = "meaningful body motion or pose anchors suggest visible Cowgirl motion despite missing expected core controller data"
+    elif not lower_complete or not torso or not thighs:
+        core_gate_status = "soft_fail"
+        failure_mode = "missing_feet_or_knees" if not lower_complete else "missing_thighs" if not thighs else "missing_but_pose_valid_possible"
+        can_override = True
+        override_reason = "core hip/pelvis motion is present but supporting controller set is incomplete"
+    elif lower_complete and torso and meaningful_core_motion:
+        core_gate_status = "pass"
+        failure_mode = ""
+        can_override = False
+        override_reason = ""
+    else:
+        core_gate_status = "unknown"
+        failure_mode = "unknown"
+        can_override = False
+        override_reason = ""
+
+    if core_gate_status == "hard_fail":
         status = "missing_core"
         gate: bool | str = False
-    elif lower_complete and torso:
+    elif core_gate_status == "pass":
         status = "complete"
         gate = True
-    elif core_present:
+    elif core_gate_status == "soft_fail":
         status = "partial"
         gate = False
     else:
@@ -128,6 +171,10 @@ def cowgirl_core_controller_requirements_for_window(
         "core_pelvis_motion_amplitude": round(float(core_motion), 6) if core_motion is not None else None,
         "lower_body_controller_set_complete": lower_complete,
         "cowgirl_core_controller_status": status,
+        "core_gate_status": core_gate_status,
+        "core_gate_failure_mode": failure_mode,
+        "core_gate_can_be_overridden": can_override,
+        "core_gate_override_reason": override_reason,
         "missing_core_controllers": _dedupe(missing),
         "generation_safe_core_controller_gate": gate,
         "warnings": _dedupe(warnings),
@@ -233,8 +280,11 @@ def _write_report(rows: list[dict[str, Any]], report: str | Path) -> None:
     target = Path(report)
     target.parent.mkdir(parents=True, exist_ok=True)
     status_counts = Counter(r.get("cowgirl_core_controller_status") for r in rows)
+    gate_counts = Counter(r.get("core_gate_status") for r in rows)
     gate_pass = sum(1 for r in rows if r.get("generation_safe_core_controller_gate") is True)
     missing_core = [r for r in rows if r.get("cowgirl_core_controller_status") == "missing_core"]
+    soft_fail = [r for r in rows if r.get("core_gate_status") == "soft_fail"]
+    hard_fail = [r for r in rows if r.get("core_gate_status") == "hard_fail"]
     lower_complete = sum(1 for r in rows if r.get("lower_body_controller_set_complete"))
     lines = [
         "# Cowgirl Core Controller Requirements Report",
@@ -243,6 +293,8 @@ def _write_report(rows: list[dict[str, Any]], report: str | Path) -> None:
         "",
         f"- Windows audited: {len(rows)}",
         f"- Core-controller gate pass: {gate_pass}",
+        f"- Core gate soft-fail: {len(soft_fail)}",
+        f"- Core gate hard-fail: {len(hard_fail)}",
         f"- Missing-core windows: {len(missing_core)}",
         f"- Lower-body controller set complete: {lower_complete}",
         "",
@@ -250,6 +302,16 @@ def _write_report(rows: list[dict[str, Any]], report: str | Path) -> None:
         "",
     ]
     lines.extend(f"- `{k}`: {v}" for k, v in status_counts.most_common()) if status_counts else lines.append("- None")
+    lines.extend(["", "## Core Gate Status", ""])
+    lines.extend(f"- `{k}`: {v}" for k, v in gate_counts.most_common()) if gate_counts else lines.append("- None")
+    lines.extend(["", "## Soft-Fail / Override Candidates", ""])
+    for row in soft_fail[:25]:
+        lines.append(
+            f"- `{row.get('window_id')}` mode=`{row.get('core_gate_failure_mode')}` "
+            f"reason={row.get('core_gate_override_reason')} scene=`{row.get('source_scene_file')}`"
+        )
+    if not soft_fail:
+        lines.append("- None")
     lines.extend(["", "## Missing-Core Examples", ""])
     for row in missing_core[:25]:
         lines.append(

@@ -218,6 +218,17 @@ Only continue toward labels or ML if the audit says data extraction, feature int
 
 ### Human Semantic Review Findings
 
+### Semantic Families and Candidate DBs
+
+The review pipeline now treats semantic families separately. BJ/oral motion is a valid animation family, not bad data. Cowgirl-specific filters exclude BJ/oral candidates from Cowgirl generation-safe sets, but the global semantic candidate DB preserves them with `semantic_family: bj_oral`, `excluded_from_cowgirl: true`, and `preserve_for_future_dataset: true`.
+
+Candidate DBs remain audit inventories. They are not manual labels and must not be merged into `manual_labels.yaml`. Core-controller gates can soft-fail when visible pose/motion evidence is strong, while hand/head-only or missing-core cases remain hard failures for Cowgirl generation safety.
+
+See:
+
+- [SEMANTIC_FAMILIES_AND_CANDIDATE_DBS.md](references/SEMANTIC_FAMILIES_AND_CANDIDATE_DBS.md)
+- [BJ_ORAL_DOMAIN_CLASSIFIER.md](references/BJ_ORAL_DOMAIN_CLASSIFIER.md)
+
 The first 10-item VaM semantic review showed that the machine/silver interpretation was not reliable enough for more ML. Only `review_010` was a clear Cowgirl segment. Several examples were transition/in-between motions, one looked head/BJ-domain rather than Cowgirl, and two were whole-controller/whole-person motion instead of real body/extremity animation.
 
 Those findings live under:

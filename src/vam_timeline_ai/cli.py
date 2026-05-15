@@ -81,6 +81,8 @@ def build_parser() -> argparse.ArgumentParser:
     semantic_review.add_argument("--use-cowgirl-candidate-score-v7", default="false")
     semantic_review.add_argument("--use-cowgirl-candidate-score-v8", default="false")
     semantic_review.add_argument("--use-cowgirl-candidate-score-v9", default="false")
+    semantic_review.add_argument("--use-cowgirl-candidate-score-v10", default="false")
+    semantic_review.add_argument("--use-cowgirl-candidate-score-v11", default="false")
     semantic_review.add_argument("--use-rider-receiver-discrimination", default="false")
     semantic_review.add_argument("--use-relative-motion-features", default="false")
     semantic_review.add_argument("--use-trajectory-shape-features", default="false")
@@ -273,7 +275,16 @@ def build_parser() -> argparse.ArgumentParser:
     core_controllers.add_argument("--out-jsonl", required=True)
     core_controllers.add_argument("--report", required=True)
 
-    bj_oral_guard = subparsers.add_parser("audit-bj-oral-trap-guard", help="Audit head/BJ/oral-domain trap candidates that should not be generation-safe Cowgirl.")
+    bj_oral_domain = subparsers.add_parser("classify-bj-oral-domain", help="Classify BJ/oral semantic-family candidates and preserve them outside Cowgirl.")
+    bj_oral_domain.add_argument("--run-dir", required=True)
+    bj_oral_domain.add_argument("--relative-features", required=True)
+    bj_oral_domain.add_argument("--trajectory-features", required=True)
+    bj_oral_domain.add_argument("--relative-reference-matches", required=True)
+    bj_oral_domain.add_argument("--cowgirl-core-controllers", required=True)
+    bj_oral_domain.add_argument("--out-jsonl", required=True)
+    bj_oral_domain.add_argument("--report", required=True)
+
+    bj_oral_guard = subparsers.add_parser("audit-bj-oral-trap-guard", help="Compatibility wrapper for classify-bj-oral-domain.")
     bj_oral_guard.add_argument("--run-dir", required=True)
     bj_oral_guard.add_argument("--relative-features", required=True)
     bj_oral_guard.add_argument("--trajectory-features", required=True)
@@ -370,6 +381,25 @@ def build_parser() -> argparse.ArgumentParser:
     cowgirl_score_v10.add_argument("--out-jsonl", required=True)
     cowgirl_score_v10.add_argument("--report", required=True)
 
+    cowgirl_score_v11 = subparsers.add_parser("score-cowgirl-candidates-v11", help="Score Cowgirl candidates with calibrated core gates and BJ/oral semantic-family preservation.")
+    cowgirl_score_v11.add_argument("--run-dir", required=True)
+    cowgirl_score_v11.add_argument("--relative-reference-matches", required=True)
+    cowgirl_score_v11.add_argument("--relative-features", required=True)
+    cowgirl_score_v11.add_argument("--trajectory-features", required=True)
+    cowgirl_score_v11.add_argument("--body-quality", required=True)
+    cowgirl_score_v11.add_argument("--rider-receiver-scores", required=True)
+    cowgirl_score_v11.add_argument("--pose-export-validity", required=True)
+    cowgirl_score_v11.add_argument("--controller-validity", required=True)
+    cowgirl_score_v11.add_argument("--pose-anchor-completeness", required=True)
+    cowgirl_score_v11.add_argument("--controller-orientation-validity", required=True)
+    cowgirl_score_v11.add_argument("--controller-distance-validity", required=True)
+    cowgirl_score_v11.add_argument("--cowgirl-core-controllers", required=True)
+    cowgirl_score_v11.add_argument("--bj-oral-domain", default=None)
+    cowgirl_score_v11.add_argument("--bj-oral-trap-guard", default=None)
+    cowgirl_score_v11.add_argument("--features", required=True)
+    cowgirl_score_v11.add_argument("--out-jsonl", required=True)
+    cowgirl_score_v11.add_argument("--report", required=True)
+
     candidate_db = subparsers.add_parser("build-cowgirl-candidate-db-v1", help="Build curated Cowgirl candidate inventory for review, not training.")
     candidate_db.add_argument("--run-dir", required=True)
     candidate_db.add_argument("--candidate-scores", required=True)
@@ -399,6 +429,32 @@ def build_parser() -> argparse.ArgumentParser:
     candidate_db_v2.add_argument("--out-jsonl", required=True)
     candidate_db_v2.add_argument("--out-csv", required=True)
     candidate_db_v2.add_argument("--report", required=True)
+
+    candidate_db_v3 = subparsers.add_parser("build-cowgirl-candidate-db-v3", help="Build Cowgirl candidate DB v3 with semantic-family fields.")
+    candidate_db_v3.add_argument("--run-dir", required=True)
+    candidate_db_v3.add_argument("--candidate-scores", required=True)
+    candidate_db_v3.add_argument("--relative-features", required=True)
+    candidate_db_v3.add_argument("--trajectory-features", required=True)
+    candidate_db_v3.add_argument("--body-quality", required=True)
+    candidate_db_v3.add_argument("--pose-anchor-completeness", required=True)
+    candidate_db_v3.add_argument("--controller-validity", required=True)
+    candidate_db_v3.add_argument("--controller-orientation-validity", required=True)
+    candidate_db_v3.add_argument("--controller-distance-validity", required=True)
+    candidate_db_v3.add_argument("--cowgirl-core-controllers", required=True)
+    candidate_db_v3.add_argument("--bj-oral-domain", required=True)
+    candidate_db_v3.add_argument("--out-jsonl", required=True)
+    candidate_db_v3.add_argument("--out-csv", required=True)
+    candidate_db_v3.add_argument("--report", required=True)
+
+    semantic_db_v0 = subparsers.add_parser("build-semantic-candidate-db-v0", help="Build global multi-family semantic candidate inventory v0.")
+    semantic_db_v0.add_argument("--run-dir", required=True)
+    semantic_db_v0.add_argument("--cowgirl-db", required=True)
+    semantic_db_v0.add_argument("--bj-oral-domain", required=True)
+    semantic_db_v0.add_argument("--relative-features", required=True)
+    semantic_db_v0.add_argument("--trajectory-features", required=True)
+    semantic_db_v0.add_argument("--out-jsonl", required=True)
+    semantic_db_v0.add_argument("--out-csv", required=True)
+    semantic_db_v0.add_argument("--report", required=True)
 
     cmap = subparsers.add_parser("discover-controller-map", help="Discover controller names and conservative body-part mapping.")
     cmap.add_argument("--sample-index", required=True)
@@ -1149,10 +1205,29 @@ def cmd_audit_bj_oral_trap_guard(args: argparse.Namespace) -> int:
         args.out_jsonl,
         args.report,
     )
-    traps = sum(1 for row in rows if row.get("head_or_oral_domain_trap"))
-    pose_false = sum(1 for row in rows if row.get("cowgirl_pose_false_positive"))
-    print(f"BJ/oral trap guard audit written: {args.out_jsonl}")
-    print(f"Rows: {len(rows)}; traps: {traps}; cowgirl_pose_false_positive: {pose_false}")
+    candidates = sum(1 for row in rows if row.get("bj_oral_motion_candidate"))
+    preserved = sum(1 for row in rows if row.get("preserve_for_future_dataset"))
+    print(f"BJ/oral domain classifier written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; bj_oral_candidates: {candidates}; preserved_for_future_dataset: {preserved}")
+    return 0
+
+
+def cmd_classify_bj_oral_domain(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.bj_oral_domain_classifier import classify_bj_oral_domain
+
+    rows = classify_bj_oral_domain(
+        args.run_dir,
+        args.relative_features,
+        args.trajectory_features,
+        args.relative_reference_matches,
+        args.cowgirl_core_controllers,
+        args.out_jsonl,
+        args.report,
+    )
+    candidates = sum(1 for row in rows if row.get("bj_oral_motion_candidate"))
+    preserved = sum(1 for row in rows if row.get("preserve_for_future_dataset"))
+    print(f"BJ/oral domain classifier written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; bj_oral_candidates: {candidates}; preserved_for_future_dataset: {preserved}")
     return 0
 
 
@@ -1310,6 +1385,38 @@ def cmd_score_cowgirl_candidates_v10(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_score_cowgirl_candidates_v11(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_cowgirl_candidates_v11
+
+    bj_oral_domain = args.bj_oral_domain or args.bj_oral_trap_guard
+    if not bj_oral_domain:
+        raise ValueError("score-cowgirl-candidates-v11 requires --bj-oral-domain or compatibility --bj-oral-trap-guard")
+    rows = score_cowgirl_candidates_v11(
+        args.run_dir,
+        args.relative_reference_matches,
+        args.relative_features,
+        args.trajectory_features,
+        args.body_quality,
+        args.rider_receiver_scores,
+        args.pose_export_validity,
+        args.controller_validity,
+        args.pose_anchor_completeness,
+        args.controller_orientation_validity,
+        args.controller_distance_validity,
+        args.cowgirl_core_controllers,
+        bj_oral_domain,
+        args.features,
+        args.out_jsonl,
+        args.report,
+    )
+    generation = sum(1 for row in rows if row.get("cowgirl_v11_category") in {"semantic_cowgirl_generation_safe", "semantic_cowgirl_core_soft_fail_generation_safe"})
+    soft = sum(1 for row in rows if row.get("semantic_cowgirl_core_soft_fail_generation_safe"))
+    bj = sum(1 for row in rows if row.get("semantic_family") == "bj_oral")
+    print(f"Cowgirl candidate scores v11 written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; generation_safe: {generation}; core_soft_fail_accepted: {soft}; bj_oral_preserved: {bj}")
+    return 0
+
+
 def cmd_build_cowgirl_candidate_db_v1(args: argparse.Namespace) -> int:
     from vam_timeline_ai.datasets.cowgirl_candidate_database import build_cowgirl_candidate_db_v1
 
@@ -1357,6 +1464,55 @@ def cmd_build_cowgirl_candidate_db_v2(args: argparse.Namespace) -> int:
     traps = sum(1 for row in rows if row.get("category") == "bj_oral_trap_negative")
     print(f"Cowgirl candidate DB v2 written: {args.out_jsonl}")
     print(f"Rows: {len(rows)}; generation_safe: {generation}; core_missing: {core_missing}; bj_oral_traps: {traps}")
+    return 0
+
+
+def cmd_build_cowgirl_candidate_db_v3(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.datasets.cowgirl_candidate_database import build_cowgirl_candidate_db_v3
+
+    rows = build_cowgirl_candidate_db_v3(
+        args.run_dir,
+        args.candidate_scores,
+        args.relative_features,
+        args.trajectory_features,
+        args.body_quality,
+        args.pose_anchor_completeness,
+        args.controller_validity,
+        args.controller_orientation_validity,
+        args.controller_distance_validity,
+        args.cowgirl_core_controllers,
+        args.bj_oral_domain,
+        args.out_jsonl,
+        args.out_csv,
+        args.report,
+    )
+    generation = sum(1 for row in rows if row.get("generation_safe"))
+    soft = sum(1 for row in rows if row.get("category") == "semantic_cowgirl_core_soft_fail_generation_safe")
+    bj = sum(1 for row in rows if row.get("semantic_family") == "bj_oral")
+    print(f"Cowgirl candidate DB v3 written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; generation_safe: {generation}; core_soft_fail: {soft}; bj_oral_preserved: {bj}")
+    return 0
+
+
+def cmd_build_semantic_candidate_db_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.datasets.semantic_candidate_database import build_semantic_candidate_db_v0
+
+    rows = build_semantic_candidate_db_v0(
+        args.run_dir,
+        args.cowgirl_db,
+        args.bj_oral_domain,
+        args.relative_features,
+        args.trajectory_features,
+        args.out_jsonl,
+        args.out_csv,
+        args.report,
+    )
+    families: dict[str, int] = {}
+    for row in rows:
+        family = str(row.get("semantic_family") or "unknown")
+        families[family] = families.get(family, 0) + 1
+    print(f"Semantic candidate DB v0 written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; families: {families}")
     return 0
 
 
@@ -2057,6 +2213,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_audit_controller_distance_validity(args)
     if args.command == "audit-cowgirl-core-controllers":
         return cmd_audit_cowgirl_core_controllers(args)
+    if args.command == "classify-bj-oral-domain":
+        return cmd_classify_bj_oral_domain(args)
     if args.command == "audit-bj-oral-trap-guard":
         return cmd_audit_bj_oral_trap_guard(args)
     if args.command == "score-cowgirl-candidates-v5":
@@ -2071,10 +2229,16 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_score_cowgirl_candidates_v9(args)
     if args.command == "score-cowgirl-candidates-v10":
         return cmd_score_cowgirl_candidates_v10(args)
+    if args.command == "score-cowgirl-candidates-v11":
+        return cmd_score_cowgirl_candidates_v11(args)
     if args.command == "build-cowgirl-candidate-db-v1":
         return cmd_build_cowgirl_candidate_db_v1(args)
     if args.command == "build-cowgirl-candidate-db-v2":
         return cmd_build_cowgirl_candidate_db_v2(args)
+    if args.command == "build-cowgirl-candidate-db-v3":
+        return cmd_build_cowgirl_candidate_db_v3(args)
+    if args.command == "build-semantic-candidate-db-v0":
+        return cmd_build_semantic_candidate_db_v0(args)
     if args.command == "discover-controller-map":
         return cmd_discover_controller_map(args)
     if args.command == "extract-cowgirl-features-v1":
