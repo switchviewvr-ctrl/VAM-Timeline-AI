@@ -1,0 +1,49 @@
+# Manual labels template v2.
+# Copy this file to data/labels/manual_labels.yaml before entering real labels.
+# Do not use this template file as training data.
+
+scenes:
+  "example_scene.json":
+    notes: ""
+    exclude_scene: false
+    reason: ""
+
+actors:
+  "example_scene.json":
+    "technical_atom_id":
+      semantic_role: "unknown"
+      focus_actor: "unknown"
+      confidence: 0.0
+      notes: ""
+
+samples:
+  "example_sample_id":
+    include_for_cowgirl_db: false
+    include_for_ml: false
+    semantic_role: "unknown"
+    quality: "questionable"
+    notes: ""
+
+windows:
+  "example_sample_id:0.000-4.000":
+    labels: []
+    negative_labels: []
+    uncertain_labels: []
+    semantic_role: "unknown"
+    focus_actor: "unknown"
+    partner_context_atom: ""
+    movement_quality: "questionable"
+    include_for_ml: false
+    confidence: 0.0
+    notes: ""
+
+pair_windows:
+  "example_pair_window_id":
+    rider_window_id: ""
+    receiver_window_id: ""
+    rider_atom_id: ""
+    receiver_atom_id: ""
+    pair_labels: []
+    contact_labels: []
+    confidence: 0.0
+    notes: ""

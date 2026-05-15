@@ -1,0 +1,62 @@
+# Manual label schema v2 for VaM Timeline AI.
+# This is a human-readable YAML schema. It documents allowed fields and labels.
+
+allowed_roles: ['irrelevant', 'partner_context', 'receiver', 'rider', 'unknown']
+allowed_quality: ['bad', 'good', 'questionable', 'usable']
+allowed_manual_labels:
+  - contact_unknown
+  - cowgirl_adjustment_transition
+  - cowgirl_circular_grind
+  - cowgirl_deep_slow
+  - cowgirl_depth_decrease
+  - cowgirl_depth_increase
+  - cowgirl_fast_shallow
+  - cowgirl_forward_back_rock
+  - cowgirl_hand_supported_on_floor_or_bed
+  - cowgirl_hand_supported_on_partner
+  - cowgirl_hand_supported_on_partner_chest
+  - cowgirl_hand_supported_on_partner_hips
+  - cowgirl_hand_supported_on_partner_shoulders
+  - cowgirl_hands_on_own_body
+  - cowgirl_hands_on_own_thighs
+  - cowgirl_head_down
+  - cowgirl_head_turn_left
+  - cowgirl_head_turn_right
+  - cowgirl_head_up
+  - cowgirl_irregular_human_motion
+  - cowgirl_lateral_sway
+  - cowgirl_lean_back
+  - cowgirl_lean_forward
+  - cowgirl_look_at_partner
+  - cowgirl_look_away
+  - cowgirl_no_clear_hand_support
+  - cowgirl_pause_hold
+  - cowgirl_tempo_decrease
+  - cowgirl_tempo_increase
+  - cowgirl_upright
+  - cowgirl_vertical_bounce
+  - head_attention_unknown
+  - not_cowgirl
+  - partner_context_active
+  - partner_context_static
+  - receiver_passive
+  - rider_active
+  - role_unclear
+
+sections:
+  scenes:
+    fields: [notes, exclude_scene, reason]
+  actors:
+    fields: [semantic_role, focus_actor, confidence, notes]
+  samples:
+    fields: [include_for_cowgirl_db, include_for_ml, semantic_role, quality, notes]
+  windows:
+    fields: [labels, negative_labels, uncertain_labels, semantic_role, focus_actor, partner_context_atom, movement_quality, include_for_ml, confidence, notes]
+  pair_windows:
+    fields: [rider_window_id, receiver_window_id, rider_atom_id, receiver_atom_id, pair_labels, contact_labels, confidence, notes]
+
+notes:
+  - Weak labels are not manual labels.
+  - Atom names are technical identifiers, not semantic roles.
+  - Filename hints can prioritize review but cannot label data.
+  - Multi-label windows are expected.

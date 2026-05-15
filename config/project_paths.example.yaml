@@ -1,0 +1,17 @@
+# Copy this file to project_paths.yaml if you want local overrides.
+# Paths below are the current workstation defaults.
+
+project_root: "G:\\VAM Timeline AI"
+
+references:
+  mocap_compiler: "G:\\VAM\\Research\\MocapResearch\\vam_mocap_dataset_compiler"
+  timeline_repo: "G:\\VAM\\Research\\MocapResearch\\vam-timeline-master"
+  raw_mocap_research: "G:\\VAM\\Research\\MocapResearch"
+  virtual_companion: "G:\\Virtual Companion"
+
+data:
+  audits: "G:\\VAM Timeline AI\\data\\audits"
+  baked: "G:\\VAM Timeline AI\\data\\baked"
+  semantic: "G:\\VAM Timeline AI\\data\\semantic"
+  labels: "G:\\VAM Timeline AI\\data\\labels"
+  cowgirl_db: "G:\\VAM Timeline AI\\data\\cowgirl_db"

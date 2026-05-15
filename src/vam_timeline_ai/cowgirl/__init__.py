@@ -1,0 +1,1 @@
+"""Cowgirl/riding domain analysis."""

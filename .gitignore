@@ -1,0 +1,85 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+env/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local secrets / environment
+.env
+.env.*
+!.env.example
+
+# Generated project data
+data/**
+!data/
+!data/.gitkeep
+!data/raw/
+!data/raw/.gitkeep
+!data/audits/
+!data/audits/.gitkeep
+!data/baked/
+!data/baked/.gitkeep
+!data/features/
+!data/features/.gitkeep
+!data/ml/
+!data/ml/.gitkeep
+!data/ml/datasets/
+!data/ml/datasets/.gitkeep
+!data/ml/models/
+!data/ml/models/.gitkeep
+!data/ml/reports/
+!data/ml/reports/.gitkeep
+!data/semantic/
+!data/semantic/.gitkeep
+!data/labels/
+!data/labels/.gitkeep
+!data/labels/manual_labels.template.yaml
+!data/labels/manual_labels.template_v2.yaml
+!data/labels/manual_labels.schema_v2.yaml
+!data/cowgirl_db/
+!data/cowgirl_db/.gitkeep
+
+# Never commit human labels or generated review batches by accident.
+data/labels/manual_labels.yaml
+data/labels/**/*.edited.yaml
+data/labels/batches/
+data/runs/
+
+# Generated outputs / binary motion artifacts
+outputs/**
+!outputs/
+!outputs/.gitkeep
+*.npz
+*.npy
+*.pkl
+*.joblib
+*.model
+*.onnx
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.webm
+
+# Logs and reports generated during local runs
+*.log

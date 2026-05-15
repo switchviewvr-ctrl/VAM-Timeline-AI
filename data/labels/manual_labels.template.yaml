@@ -1,0 +1,50 @@
+# Manual semantic label overrides for VaM Timeline AI.
+#
+# Manual labels are mandatory. Automatic role and behavior inference will be
+# imperfect, especially when atom names are misleading or when windows contain
+# transitions, pauses, or contact changes.
+
+scenes:
+  "206 VR mode ver.json":
+    notes: "Contains misleading atom names. Review visually before using for semantic training."
+    needs_manual_review: true
+
+actors:
+  "206 VR mode ver.json":
+    "man":
+      semantic_role: "rider"
+      focus_actor: true
+      confidence: "manual"
+      needs_manual_review: false
+      notes: "Atom name is technical only; visually this may be the active rider in some clips."
+    "Person":
+      semantic_role: "partner_context"
+      focus_actor: false
+      confidence: "manual"
+      notes: "Partner/receiver context for this scene after visual confirmation."
+
+samples:
+  "206_man_plugin0_Anim_3":
+    include_for_cowgirl_db: true
+    semantic_role: "rider"
+    confidence: "manual"
+    notes: "Good Cowgirl/Riding source. Use movement windows, not only loop quality."
+
+windows:
+  "206_man_plugin0_Anim_3:4.000-8.000":
+    labels:
+      - cowgirl_lean_forward
+      - cowgirl_hand_supported_on_partner_chest
+      - cowgirl_deep_slow
+    confidence: "manual"
+    needs_manual_review: false
+    notes: "Rider leans forward and appears to support on partner chest."
+
+  "206_man_plugin0_Anim_3:8.000-10.000":
+    labels:
+      - cowgirl_pause_hold
+      - cowgirl_adjustment_transition
+      - cowgirl_irregular_human_motion
+    confidence: "manual"
+    needs_manual_review: false
+    notes: "Short pause/adjustment is semantically useful and should not be discarded just because it is not loopable."
