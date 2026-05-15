@@ -229,6 +229,30 @@ See:
 - [SEMANTIC_FAMILIES_AND_CANDIDATE_DBS.md](references/SEMANTIC_FAMILIES_AND_CANDIDATE_DBS.md)
 - [BJ_ORAL_DOMAIN_CLASSIFIER.md](references/BJ_ORAL_DOMAIN_CLASSIFIER.md)
 
+### From Candidate DB to Generative Motion
+
+The final goal is not clip stitching. Candidate DB entries are source material for learning relative movement principles: local trajectory shapes, rhythm, amplitude, controller coordination, anchors, and safety constraints.
+
+The intended architecture is:
+
+```text
+text prompt -> semantic motion plan -> generated relative motion flow -> VaM Timeline animation
+```
+
+New generation-layer prototypes make that separation explicit:
+
+- Motion primitives summarize relative movement patterns and contain no absolute world-coordinate generation targets.
+- Semantic motion plans encode requested family, subtype, trajectory, tempo, depth, and safety requirements.
+- Primitive retrieval inspects learned pattern space and does not concatenate Timeline clips.
+- Motion flow skeletons describe future relative controller tracks and remain `export_ready: false`.
+
+See:
+
+- [MOTION_PRIMITIVE_ABSTRACTION.md](references/MOTION_PRIMITIVE_ABSTRACTION.md)
+- [SEMANTIC_MOTION_PLAN.md](references/SEMANTIC_MOTION_PLAN.md)
+- [WHY_RETRIEVAL_IS_NOT_FINAL_GENERATION.md](references/WHY_RETRIEVAL_IS_NOT_FINAL_GENERATION.md)
+- [TEXT_TO_TIMELINE_ROADMAP.md](references/TEXT_TO_TIMELINE_ROADMAP.md)
+
 The first 10-item VaM semantic review showed that the machine/silver interpretation was not reliable enough for more ML. Only `review_010` was a clear Cowgirl segment. Several examples were transition/in-between motions, one looked head/BJ-domain rather than Cowgirl, and two were whole-controller/whole-person motion instead of real body/extremity animation.
 
 Those findings live under:

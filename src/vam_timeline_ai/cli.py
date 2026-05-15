@@ -456,6 +456,36 @@ def build_parser() -> argparse.ArgumentParser:
     semantic_db_v0.add_argument("--out-csv", required=True)
     semantic_db_v0.add_argument("--report", required=True)
 
+    primitives = subparsers.add_parser("extract-cowgirl-motion-primitives-v0", help="Extract abstract Cowgirl relative motion primitives from generation-safe candidates.")
+    primitives.add_argument("--candidate-db", required=True)
+    primitives.add_argument("--relative-features", required=True)
+    primitives.add_argument("--trajectory-features", required=True)
+    primitives.add_argument("--relative-index", required=True)
+    primitives.add_argument("--out-jsonl", required=True)
+    primitives.add_argument("--out-report", required=True)
+
+    primitive_groups = subparsers.add_parser("group-cowgirl-motion-primitives-v0", help="Group abstract Cowgirl motion primitives by subtype, trajectory, rhythm, and amplitude.")
+    primitive_groups.add_argument("--primitives", required=True)
+    primitive_groups.add_argument("--out-json", required=True)
+    primitive_groups.add_argument("--report", required=True)
+
+    draft_plan = subparsers.add_parser("draft-motion-plan-v0", help="Draft a rule-based semantic motion plan. This is not final text-to-animation.")
+    draft_plan.add_argument("--prompt", required=True)
+    draft_plan.add_argument("--out", required=True)
+
+    retrieve = subparsers.add_parser("retrieve-primitives-for-plan-v0", help="Retrieve abstract primitives matching a semantic motion plan without exporting Timeline.")
+    retrieve.add_argument("--plan", required=True)
+    retrieve.add_argument("--primitive-groups", required=True)
+    retrieve.add_argument("--primitives", required=True)
+    retrieve.add_argument("--out", required=True)
+    retrieve.add_argument("--report", required=True)
+
+    flow = subparsers.add_parser("generate-motion-flow-skeleton-v0", help="Generate a placeholder relative motion flow skeleton, not a Timeline export.")
+    flow.add_argument("--plan", required=True)
+    flow.add_argument("--retrieved-primitives", required=True)
+    flow.add_argument("--out", required=True)
+    flow.add_argument("--report", required=True)
+
     cmap = subparsers.add_parser("discover-controller-map", help="Discover controller names and conservative body-part mapping.")
     cmap.add_argument("--sample-index", required=True)
     cmap.add_argument("--out", required=True)
@@ -1516,6 +1546,60 @@ def cmd_build_semantic_candidate_db_v0(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_extract_cowgirl_motion_primitives_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.primitive_extractor import extract_cowgirl_motion_primitives_v0
+
+    rows = extract_cowgirl_motion_primitives_v0(
+        args.candidate_db,
+        args.relative_features,
+        args.trajectory_features,
+        args.relative_index,
+        args.out_jsonl,
+        args.out_report,
+    )
+    print(f"Cowgirl motion primitives v0 written: {args.out_jsonl}")
+    print(f"Primitives: {len(rows)}")
+    return 0
+
+
+def cmd_group_cowgirl_motion_primitives_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.primitive_groups import group_cowgirl_motion_primitives_v0
+
+    data = group_cowgirl_motion_primitives_v0(args.primitives, args.out_json, args.report)
+    groups = data.get("groups", [])
+    print(f"Cowgirl motion primitive groups v0 written: {args.out_json}")
+    print(f"Groups: {len(groups)}")
+    return 0
+
+
+def cmd_draft_motion_plan_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.prompt_to_plan import draft_motion_plan_v0
+
+    plan = draft_motion_plan_v0(args.prompt, args.out)
+    print(f"Draft motion plan v0 written: {args.out}")
+    print(f"Plan: {plan.get('plan_id')}; family={plan.get('family')}; subtypes={plan.get('requested_subtypes')}")
+    return 0
+
+
+def cmd_retrieve_primitives_for_plan_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.primitive_retrieval import retrieve_primitives_for_plan_v0
+
+    result = retrieve_primitives_for_plan_v0(args.plan, args.primitive_groups, args.primitives, args.out, args.report)
+    total = sum(int(match.get("candidate_count") or 0) for match in result.get("matches", []))
+    print(f"Retrieved primitives v0 written: {args.out}")
+    print(f"Candidate primitive matches: {total}; timeline_export_performed={result.get('timeline_export_performed')}")
+    return 0
+
+
+def cmd_generate_motion_flow_skeleton_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.motion_flow_generator import generate_motion_flow_skeleton_v0
+
+    flow = generate_motion_flow_skeleton_v0(args.plan, args.retrieved_primitives, args.out, args.report)
+    print(f"Motion flow skeleton v0 written: {args.out}")
+    print(f"Flow: {flow.get('flow_id')}; export_ready={flow.get('export_ready')}; coordinate_space={flow.get('coordinate_space')}")
+    return 0
+
+
 def cmd_discover_controller_map(args: argparse.Namespace) -> int:
     from vam_timeline_ai.motion.controller_mapping import discover_controller_map
 
@@ -2239,6 +2323,16 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_build_cowgirl_candidate_db_v3(args)
     if args.command == "build-semantic-candidate-db-v0":
         return cmd_build_semantic_candidate_db_v0(args)
+    if args.command == "extract-cowgirl-motion-primitives-v0":
+        return cmd_extract_cowgirl_motion_primitives_v0(args)
+    if args.command == "group-cowgirl-motion-primitives-v0":
+        return cmd_group_cowgirl_motion_primitives_v0(args)
+    if args.command == "draft-motion-plan-v0":
+        return cmd_draft_motion_plan_v0(args)
+    if args.command == "retrieve-primitives-for-plan-v0":
+        return cmd_retrieve_primitives_for_plan_v0(args)
+    if args.command == "generate-motion-flow-skeleton-v0":
+        return cmd_generate_motion_flow_skeleton_v0(args)
     if args.command == "discover-controller-map":
         return cmd_discover_controller_map(args)
     if args.command == "extract-cowgirl-features-v1":
