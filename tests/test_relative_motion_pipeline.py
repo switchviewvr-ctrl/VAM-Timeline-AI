@@ -6,15 +6,17 @@ from vam_timeline_ai.audits.semantic_review import export_semantic_review_010
 from vam_timeline_ai.audits.pose_export_validity import pose_export_validity_for_review_item
 from vam_timeline_ai.audits.controller_validity import controller_validity_for_arrays
 from vam_timeline_ai.audits.controller_orientation_validity import controller_orientation_validity_for_arrays
+from vam_timeline_ai.audits.controller_distance_validity import controller_distance_validity_for_arrays
 from vam_timeline_ai.audits.pose_anchor_completeness import pose_anchor_completeness_for_parts
 from vam_timeline_ai.audits.semantic_review import _filter_safe_export_controllers
+from vam_timeline_ai.datasets.cowgirl_candidate_database import build_cowgirl_candidate_db_v1
 from vam_timeline_ai.features.relative_features import relative_features_from_arrays
 from vam_timeline_ai.features.trajectory_shape import trajectory_shape_for_points
 from vam_timeline_ai.io.json_utils import load_jsonl, write_jsonl
 from vam_timeline_ai.motion.coordinate_spaces import can_use_for_final_export, is_allowed_body_controller_track, is_disallowed_world_or_root_track
 from vam_timeline_ai.motion.relative_motion import build_relative_motion_window_row
 from vam_timeline_ai.references.relative_matcher import compare_relative_wild_to_handmade
-from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_window_v4, score_window_v5, score_window_v6, score_window_v7, score_window_v8
+from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_window_v4, score_window_v5, score_window_v6, score_window_v7, score_window_v8, score_window_v9
 
 
 def _times(n=121):
@@ -701,3 +703,145 @@ def test_semantic_review_v10_includes_orientation_validity_fields(tmp_path):
     assert safe
     assert all(not r["system_semantic_guess"]["controller_rotation_invalid"] for r in safe)
     assert all(not r["system_semantic_guess"]["missing_foot_controllers"] for r in safe)
+
+
+def test_controller_distance_validity_detects_far_away_controller():
+    n = 20
+    hip = np.zeros((n, 3), dtype=np.float32)
+    knee = np.tile(np.array([0.0, -0.45, 0.0], dtype=np.float32), (n, 1))
+    foot = np.tile(np.array([3.8, -0.8, 0.0], dtype=np.float32), (n, 1))
+    positions = np.stack([hip, knee, foot], axis=1)
+    row = controller_distance_validity_for_arrays(positions, ["hip", "left_knee", "left_foot"], ["hipControl", "lKneeControl", "lFootControl"], scale=1.0, row={"window_id": "win"})
+    assert row["controller_distance_validity_status"] == "invalid"
+    assert row["controller_distance_outlier"]
+    assert row["foot_distance_outlier"]
+
+
+def test_controller_distance_validity_passes_plausible_chain():
+    n = 20
+    hip = np.zeros((n, 3), dtype=np.float32)
+    knee = np.tile(np.array([0.0, -0.45, 0.05], dtype=np.float32), (n, 1))
+    foot = np.tile(np.array([0.08, -0.9, 0.10], dtype=np.float32), (n, 1))
+    positions = np.stack([hip, knee, foot], axis=1)
+    row = controller_distance_validity_for_arrays(positions, ["hip", "left_knee", "left_foot"], ["hipControl", "lKneeControl", "lFootControl"], scale=1.0, row={"window_id": "win"})
+    assert row["controller_distance_validity_status"] == "valid"
+    assert not row["controller_distance_outlier"]
+
+
+def test_distance_invalid_lowers_generation_not_semantic_score():
+    base = _v8_score()
+    distance = {
+        "controller_distance_validity_status": "invalid",
+        "controller_distance_validity_score": 0.1,
+        "controller_distance_outlier": True,
+        "foot_distance_outlier": True,
+        "outlier_controller_names": ["left_foot"],
+    }
+    row = score_window_v9(
+        {"window_id": "win", "sample_id": "sample", "source_id": "src", "feature_values": {}},
+        {"body_motion_quality": "good_body_motion"},
+        {"cowgirl_relative_score": 0.9, "cowgirl_grind_trajectory_score": 0.85, "safe_for_learning": True},
+        {"feature_values": {"safe_for_learning": 1.0, "local_path_length": 1.0, "local_motion_energy": 1.0}, "feature_quality": {"teleport_risk": "low"}},
+        {"trajectory_shape_classification": "oval_grind", "feature_values": {"oval_path_score": 0.85, "ellipse_fit_score": 0.8, "closed_loop_ratio": 0.75, "grind_pattern_score": 0.85, "jitter_score": 0.05, "transition_path_score": 0.05}},
+        {"duration_seconds": 4.0},
+        {"rider_receiver_status": "likely_active_rider", "active_rider_score": 0.85, "receiver_body_response_score": 0.05},
+        {"export_pose_validity": "good", "generation_template_safe": True, "motion_strength_score": 0.9, "semantic_motion_likely_valid": True},
+        {"controller_validity_status": "valid", "controller_validity_score": 0.95, "generation_pose_valid": True},
+        {"pose_anchor_completeness_score": 1.0, "generation_pose_anchor_safe": True, "missing_foot_controllers": False, "missing_knee_controllers": False, "pose_anchor_incomplete": False, "foot_controllers_present": True, "knee_controllers_present": True},
+        {"orientation_validity_status": "valid", "orientation_validity_score": 0.95},
+        distance,
+    )
+    assert base["final_semantic_cowgirl_score_v8"] >= 0.5
+    assert row["final_semantic_cowgirl_score_v9"] >= 0.5
+    assert row["final_generation_candidate_score_v9"] < 0.1
+    assert row["semantic_cowgirl_distance_invalid"]
+
+
+def test_candidate_db_separates_generation_safe_and_pose_invalid(tmp_path):
+    from tests.test_semantic_review import _make_run
+
+    run = _make_run(tmp_path)
+    (run / "datasets").mkdir(parents=True, exist_ok=True)
+    rows = [
+        {"window_id": "win_00", "sample_id": "s0", "final_semantic_cowgirl_score_v9": 0.9, "final_clean_motion_score_v9": 0.8, "final_generation_candidate_score_v9": 0.7, "cowgirl_v9_category": "semantic_cowgirl_generation_safe", "semantic_cowgirl_generation_safe": True, "trajectory_shape_classification": "oval_grind"},
+        {"window_id": "win_01", "sample_id": "s1", "final_semantic_cowgirl_score_v9": 0.8, "final_clean_motion_score_v9": 0.7, "final_generation_candidate_score_v9": 0.02, "cowgirl_v9_category": "semantic_cowgirl_distance_invalid", "semantic_cowgirl_distance_invalid": True, "controller_distance_outlier": True, "trajectory_shape_classification": "oval_grind"},
+    ]
+    write_jsonl(run / "audits" / "cowgirl_candidate_scores_v9.jsonl", rows)
+    for name in ["relative_motion_features.jsonl", "trajectory_shape_features.jsonl"]:
+        write_jsonl(run / "relative_motion" / name, [{"window_id": "win_00", "feature_values": {"safe_for_learning": 1.0}, "trajectory_shape_classification": "oval_grind"}, {"window_id": "win_01", "feature_values": {"safe_for_learning": 1.0}, "trajectory_shape_classification": "oval_grind"}])
+    write_jsonl(run / "audits" / "body_motion_quality.jsonl", [{"window_id": "win_00", "body_motion_quality": "good_body_motion"}, {"window_id": "win_01", "body_motion_quality": "good_body_motion"}])
+    write_jsonl(run / "audits" / "pose_anchor_completeness.jsonl", [{"window_id": "win_00", "generation_pose_anchor_status": "complete"}, {"window_id": "win_01", "generation_pose_anchor_status": "complete"}])
+    write_jsonl(run / "audits" / "controller_validity.jsonl", [{"window_id": "win_00", "controller_validity_status": "valid"}, {"window_id": "win_01", "controller_validity_status": "valid"}])
+    write_jsonl(run / "audits" / "controller_orientation_validity.jsonl", [{"window_id": "win_00", "orientation_validity_status": "valid"}, {"window_id": "win_01", "orientation_validity_status": "valid"}])
+    write_jsonl(run / "audits" / "controller_distance_validity.jsonl", [{"window_id": "win_00", "controller_distance_validity_status": "valid"}, {"window_id": "win_01", "controller_distance_validity_status": "invalid", "controller_distance_outlier": True}])
+    out = run / "datasets" / "cowgirl_candidate_db_v1.jsonl"
+    db = build_cowgirl_candidate_db_v1(
+        run,
+        run / "audits" / "cowgirl_candidate_scores_v9.jsonl",
+        run / "relative_motion" / "relative_motion_features.jsonl",
+        run / "relative_motion" / "trajectory_shape_features.jsonl",
+        run / "audits" / "body_motion_quality.jsonl",
+        run / "audits" / "pose_anchor_completeness.jsonl",
+        run / "audits" / "controller_validity.jsonl",
+        run / "audits" / "controller_orientation_validity.jsonl",
+        run / "audits" / "controller_distance_validity.jsonl",
+        out,
+        run / "datasets" / "cowgirl_candidate_db_v1.csv",
+        run / "datasets" / "cowgirl_candidate_db_v1_report.md",
+    )
+    categories = {r["category"] for r in db}
+    assert "semantic_cowgirl_generation_safe" in categories
+    assert "semantic_cowgirl_distance_invalid" in categories
+    invalid = [r for r in db if r["category"] == "semantic_cowgirl_distance_invalid"][0]
+    assert invalid["cowgirl_subtype"] in {"oval_grind", "unknown"}
+    assert "controller_distance_outlier" in invalid["invalidity_reasons"]
+
+
+def test_semantic_review_v11_uses_candidate_db_categories(tmp_path):
+    from tests.test_semantic_review import _make_run
+
+    run = _make_run(tmp_path)
+    (run / "datasets").mkdir(parents=True, exist_ok=True)
+    db_rows = []
+    cats = [
+        "semantic_cowgirl_generation_safe",
+        "semantic_cowgirl_generation_safe",
+        "semantic_cowgirl_generation_safe",
+        "semantic_cowgirl_generation_safe",
+        "semantic_cowgirl_generation_safe",
+        "semantic_cowgirl_distance_invalid",
+        "semantic_cowgirl_anchor_incomplete",
+        "cowgirl_context_intro_low_motion",
+        "standing_hand_head_negative",
+        "unknown_or_unusable",
+        "receiver_response_negative",
+        "semantic_cowgirl_orientation_invalid",
+    ]
+    score_rows = []
+    distance_rows = []
+    for idx, cat in enumerate(cats):
+        wid = f"win_{idx:02d}"
+        db_rows.append({
+            "window_id": wid,
+            "sample_id": f"sample_{idx % 4}",
+            "category": cat,
+            "semantic_cowgirl_score": 0.9 - idx * 0.02,
+            "clean_motion_score": 0.8,
+            "generation_candidate_score": 0.7 if cat == "semantic_cowgirl_generation_safe" else 0.02,
+            "cowgirl_subtype": "oval_grind",
+            "generation_safe": cat == "semantic_cowgirl_generation_safe",
+            "invalidity_reasons": ["controller_distance_outlier"] if "distance" in cat else [],
+        })
+        score_rows.append({"window_id": wid, "final_semantic_cowgirl_score_v9": 0.9, "final_generation_candidate_score_v9": 0.7 if cat == "semantic_cowgirl_generation_safe" else 0.02, "cowgirl_v9_category": cat})
+        distance_rows.append({"window_id": wid, "controller_distance_validity_status": "invalid" if "distance" in cat else "valid", "controller_distance_outlier": "distance" in cat})
+    write_jsonl(run / "datasets" / "cowgirl_candidate_db_v1.jsonl", db_rows)
+    write_jsonl(run / "audits" / "cowgirl_candidate_scores_v9.jsonl", score_rows)
+    write_jsonl(run / "audits" / "controller_distance_validity.jsonl", distance_rows)
+    out = run / "audits" / "semantic_review_010_v11"
+    export_semantic_review_010(run, out, count=10, attempt_timeline_export=False, candidate_db=run / "datasets" / "cowgirl_candidate_db_v1.jsonl", use_cowgirl_candidate_db=True)
+    rows = load_jsonl(out / "semantic_review_010.jsonl")
+    categories = {r["category"] for r in rows}
+    assert "semantic_cowgirl_generation_safe" in categories
+    assert "semantic_cowgirl_distance_invalid" in categories or "semantic_cowgirl_anchor_incomplete" in categories
+    assert "cowgirl_candidate_db_record" in rows[0]["evidence"]
+    assert rows[0]["system_semantic_guess"]["candidate_db_category"] is not None

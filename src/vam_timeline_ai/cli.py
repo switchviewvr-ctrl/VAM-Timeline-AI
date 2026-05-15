@@ -66,6 +66,8 @@ def build_parser() -> argparse.ArgumentParser:
     semantic_review.add_argument("--count", type=int, default=10)
     semantic_review.add_argument("--attempt-timeline-export", default="true")
     semantic_review.add_argument("--export-mode", default="motion_only", choices=["motion_only", "motion_plus_static_anchors", "generation_template_candidate"])
+    semantic_review.add_argument("--candidate-db", default=None)
+    semantic_review.add_argument("--use-cowgirl-candidate-db", default="false")
     semantic_review.add_argument("--use-body-motion-quality", default="false")
     semantic_review.add_argument("--prefer-clean-body-motion", default="false")
     semantic_review.add_argument("--use-handmade-reference-matches", default="false")
@@ -78,6 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
     semantic_review.add_argument("--use-cowgirl-candidate-score-v6", default="false")
     semantic_review.add_argument("--use-cowgirl-candidate-score-v7", default="false")
     semantic_review.add_argument("--use-cowgirl-candidate-score-v8", default="false")
+    semantic_review.add_argument("--use-cowgirl-candidate-score-v9", default="false")
     semantic_review.add_argument("--use-rider-receiver-discrimination", default="false")
     semantic_review.add_argument("--use-relative-motion-features", default="false")
     semantic_review.add_argument("--use-trajectory-shape-features", default="false")
@@ -252,6 +255,15 @@ def build_parser() -> argparse.ArgumentParser:
     orientation_validity.add_argument("--out-jsonl", required=True)
     orientation_validity.add_argument("--report", required=True)
 
+    distance_validity = subparsers.add_parser("audit-controller-distance-validity", help="Audit controller distance plausibility for generation safety.")
+    distance_validity.add_argument("--run-dir", required=True)
+    distance_validity.add_argument("--relative-index", required=True)
+    distance_validity.add_argument("--sample-index", required=True)
+    distance_validity.add_argument("--controller-map", required=True)
+    distance_validity.add_argument("--pose-anchor-completeness", default=None)
+    distance_validity.add_argument("--out-jsonl", required=True)
+    distance_validity.add_argument("--report", required=True)
+
     cowgirl_score_v5 = subparsers.add_parser("score-cowgirl-candidates-v5", help="Score semantic Cowgirl separately from generation/export usability.")
     cowgirl_score_v5.add_argument("--run-dir", required=True)
     cowgirl_score_v5.add_argument("--relative-reference-matches", required=True)
@@ -305,6 +317,36 @@ def build_parser() -> argparse.ArgumentParser:
     cowgirl_score_v8.add_argument("--features", required=True)
     cowgirl_score_v8.add_argument("--out-jsonl", required=True)
     cowgirl_score_v8.add_argument("--report", required=True)
+
+    cowgirl_score_v9 = subparsers.add_parser("score-cowgirl-candidates-v9", help="Score Cowgirl candidates with distance/orientation/anchor generation safety.")
+    cowgirl_score_v9.add_argument("--run-dir", required=True)
+    cowgirl_score_v9.add_argument("--relative-reference-matches", required=True)
+    cowgirl_score_v9.add_argument("--relative-features", required=True)
+    cowgirl_score_v9.add_argument("--trajectory-features", required=True)
+    cowgirl_score_v9.add_argument("--body-quality", required=True)
+    cowgirl_score_v9.add_argument("--rider-receiver-scores", required=True)
+    cowgirl_score_v9.add_argument("--pose-export-validity", required=True)
+    cowgirl_score_v9.add_argument("--controller-validity", required=True)
+    cowgirl_score_v9.add_argument("--pose-anchor-completeness", required=True)
+    cowgirl_score_v9.add_argument("--controller-orientation-validity", required=True)
+    cowgirl_score_v9.add_argument("--controller-distance-validity", required=True)
+    cowgirl_score_v9.add_argument("--features", required=True)
+    cowgirl_score_v9.add_argument("--out-jsonl", required=True)
+    cowgirl_score_v9.add_argument("--report", required=True)
+
+    candidate_db = subparsers.add_parser("build-cowgirl-candidate-db-v1", help="Build curated Cowgirl candidate inventory for review, not training.")
+    candidate_db.add_argument("--run-dir", required=True)
+    candidate_db.add_argument("--candidate-scores", required=True)
+    candidate_db.add_argument("--relative-features", required=True)
+    candidate_db.add_argument("--trajectory-features", required=True)
+    candidate_db.add_argument("--body-quality", required=True)
+    candidate_db.add_argument("--pose-anchor-completeness", required=True)
+    candidate_db.add_argument("--controller-validity", required=True)
+    candidate_db.add_argument("--controller-orientation-validity", required=True)
+    candidate_db.add_argument("--controller-distance-validity", required=True)
+    candidate_db.add_argument("--out-jsonl", required=True)
+    candidate_db.add_argument("--out-csv", required=True)
+    candidate_db.add_argument("--report", required=True)
 
     cmap = subparsers.add_parser("discover-controller-map", help="Discover controller names and conservative body-part mapping.")
     cmap.add_argument("--sample-index", required=True)
@@ -1002,6 +1044,25 @@ def cmd_audit_controller_orientation_validity(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_audit_controller_distance_validity(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.controller_distance_validity import audit_controller_distance_validity
+
+    rows = audit_controller_distance_validity(
+        args.run_dir,
+        args.relative_index,
+        args.sample_index,
+        args.controller_map,
+        args.pose_anchor_completeness,
+        args.out_jsonl,
+        args.report,
+    )
+    invalid = sum(1 for row in rows if row.get("controller_distance_validity_status") == "invalid")
+    outliers = sum(1 for row in rows if row.get("controller_distance_outlier"))
+    print(f"Controller distance validity audit written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; invalid: {invalid}; distance_outliers: {outliers}")
+    return 0
+
+
 def cmd_score_cowgirl_candidates_v5(args: argparse.Namespace) -> int:
     from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_cowgirl_candidates_v5
 
@@ -1096,6 +1157,56 @@ def cmd_score_cowgirl_candidates_v8(args: argparse.Namespace) -> int:
     orientation_invalid = sum(1 for row in rows if row.get("semantic_cowgirl_orientation_invalid"))
     print(f"Cowgirl candidate scores v8 written: {args.out_jsonl}")
     print(f"Rows: {len(rows)}; semantic: {semantic}; generation_safe: {generation}; orientation_invalid: {orientation_invalid}")
+    return 0
+
+
+def cmd_score_cowgirl_candidates_v9(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_cowgirl_candidates_v9
+
+    rows = score_cowgirl_candidates_v9(
+        args.run_dir,
+        args.relative_reference_matches,
+        args.relative_features,
+        args.trajectory_features,
+        args.body_quality,
+        args.rider_receiver_scores,
+        args.pose_export_validity,
+        args.controller_validity,
+        args.pose_anchor_completeness,
+        args.controller_orientation_validity,
+        args.controller_distance_validity,
+        args.features,
+        args.out_jsonl,
+        args.report,
+    )
+    semantic = sum(1 for row in rows if row.get("semantic_cowgirl_candidate_v9"))
+    generation = sum(1 for row in rows if row.get("semantic_cowgirl_generation_safe"))
+    distance_invalid = sum(1 for row in rows if row.get("semantic_cowgirl_distance_invalid"))
+    print(f"Cowgirl candidate scores v9 written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; semantic: {semantic}; generation_safe: {generation}; distance_invalid: {distance_invalid}")
+    return 0
+
+
+def cmd_build_cowgirl_candidate_db_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.datasets.cowgirl_candidate_database import build_cowgirl_candidate_db_v1
+
+    rows = build_cowgirl_candidate_db_v1(
+        args.run_dir,
+        args.candidate_scores,
+        args.relative_features,
+        args.trajectory_features,
+        args.body_quality,
+        args.pose_anchor_completeness,
+        args.controller_validity,
+        args.controller_orientation_validity,
+        args.controller_distance_validity,
+        args.out_jsonl,
+        args.out_csv,
+        args.report,
+    )
+    generation = sum(1 for row in rows if row.get("category") == "semantic_cowgirl_generation_safe")
+    print(f"Cowgirl candidate DB v1 written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; generation_safe: {generation}")
     return 0
 
 
@@ -1657,6 +1768,8 @@ def cmd_export_semantic_review_010(args: argparse.Namespace) -> int:
         count=args.count,
         attempt_timeline_export=_arg_bool(args.attempt_timeline_export),
         export_mode=args.export_mode,
+        candidate_db=args.candidate_db,
+        use_cowgirl_candidate_db=_arg_bool(args.use_cowgirl_candidate_db),
         use_body_motion_quality=_arg_bool(args.use_body_motion_quality),
         prefer_clean_body_motion=_arg_bool(args.prefer_clean_body_motion),
         use_handmade_reference_matches=_arg_bool(args.use_handmade_reference_matches),
@@ -1669,6 +1782,7 @@ def cmd_export_semantic_review_010(args: argparse.Namespace) -> int:
         use_cowgirl_candidate_score_v6=_arg_bool(args.use_cowgirl_candidate_score_v6),
         use_cowgirl_candidate_score_v7=_arg_bool(args.use_cowgirl_candidate_score_v7),
         use_cowgirl_candidate_score_v8=_arg_bool(args.use_cowgirl_candidate_score_v8),
+        use_cowgirl_candidate_score_v9=_arg_bool(args.use_cowgirl_candidate_score_v9),
         use_rider_receiver_discrimination=_arg_bool(args.use_rider_receiver_discrimination),
         use_relative_motion_features=_arg_bool(args.use_relative_motion_features),
         use_trajectory_shape_features=_arg_bool(args.use_trajectory_shape_features),
@@ -1789,6 +1903,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_audit_controller_validity(args)
     if args.command == "audit-controller-orientation-validity":
         return cmd_audit_controller_orientation_validity(args)
+    if args.command == "audit-controller-distance-validity":
+        return cmd_audit_controller_distance_validity(args)
     if args.command == "score-cowgirl-candidates-v5":
         return cmd_score_cowgirl_candidates_v5(args)
     if args.command == "score-cowgirl-candidates-v6":
@@ -1797,6 +1913,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_score_cowgirl_candidates_v7(args)
     if args.command == "score-cowgirl-candidates-v8":
         return cmd_score_cowgirl_candidates_v8(args)
+    if args.command == "score-cowgirl-candidates-v9":
+        return cmd_score_cowgirl_candidates_v9(args)
+    if args.command == "build-cowgirl-candidate-db-v1":
+        return cmd_build_cowgirl_candidate_db_v1(args)
     if args.command == "discover-controller-map":
         return cmd_discover_controller_map(args)
     if args.command == "extract-cowgirl-features-v1":
