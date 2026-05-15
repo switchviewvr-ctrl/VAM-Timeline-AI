@@ -174,6 +174,48 @@ python -m vam_timeline_ai.cli run-machine-labeling-v2 ^
 
 The optional silver baseline is only a feature sanity check. If it trains, its metrics measure rule/proxy reproducibility, not human semantic accuracy. Human labels remain required before real supervised semantic ML.
 
+### Reality Audit Before Further ML
+
+Before doing more ML work, run a reality audit to check whether the extracted motion, controller mappings, feature proxies, pair windows, and machine/silver hints match what is actually visible in the previews.
+
+This audit is not manual semantic labeling for training. It writes a separate annotation file under `data\runs\clean_v2\audits\...` and must not be merged into `manual_labels.yaml`.
+
+```powershell
+python -m vam_timeline_ai.cli export-reality-audit-100 ^
+  --run-dir data\runs\clean_v2 ^
+  --out-dir data\runs\clean_v2\audits\reality_audit_001 ^
+  --count 100
+```
+
+Open:
+
+```text
+data\runs\clean_v2\audits\reality_audit_001\previews\index.html
+```
+
+Copy:
+
+```text
+data\runs\clean_v2\audits\reality_audit_001\reality_audit_annotation.stub.yaml
+```
+
+Save the edited audit answers as:
+
+```text
+data\runs\clean_v2\audits\reality_audit_001\reality_audit_annotation.edited.yaml
+```
+
+Then summarize the audit:
+
+```powershell
+python -m vam_timeline_ai.cli summarize-reality-audit ^
+  --annotations data\runs\clean_v2\audits\reality_audit_001\reality_audit_annotation.edited.yaml ^
+  --audit-batch data\runs\clean_v2\audits\reality_audit_001\reality_audit_batch.jsonl ^
+  --out data\runs\clean_v2\audits\reality_audit_001\reality_audit_result.md
+```
+
+Only continue toward labels or ML if the audit says data extraction, feature interpretation, and pair context are trustworthy enough.
+
 ## Commands
 
 Print project and reference status:

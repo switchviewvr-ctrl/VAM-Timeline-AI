@@ -50,6 +50,16 @@ def build_parser() -> argparse.ArgumentParser:
     local_status.add_argument("--run-dir", required=True)
     local_status.add_argument("--out", required=True)
 
+    reality = subparsers.add_parser("export-reality-audit-100", help="Export 100 reality-audit examples without training or labels.")
+    reality.add_argument("--run-dir", required=True)
+    reality.add_argument("--out-dir", required=True)
+    reality.add_argument("--count", type=int, default=100)
+
+    reality_summary = subparsers.add_parser("summarize-reality-audit", help="Summarize completed reality-audit annotations.")
+    reality_summary.add_argument("--annotations", required=True)
+    reality_summary.add_argument("--audit-batch", required=True)
+    reality_summary.add_argument("--out", required=True)
+
     clean = subparsers.add_parser("prepare-clean-run", help="Create clean run folders and a run manifest.")
     clean.add_argument("--data-root", required=True)
     clean.add_argument("--run-name", required=True)
@@ -1062,6 +1072,25 @@ def cmd_run_machine_labeling_v2(args: argparse.Namespace) -> int:
     return 0 if summary["status"] == "ok" else 1
 
 
+def cmd_export_reality_audit_100(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.reality_audit import export_reality_audit_100
+
+    summary = export_reality_audit_100(args.run_dir, args.out_dir, count=args.count)
+    print(f"Reality audit export written: {args.out_dir}")
+    print(f"Audit items: {summary['audit_items']}; categories={summary['category_distribution']}")
+    print(f"Preview images: {summary['preview_images']}; manual labels modified={summary['manual_labels_modified']}")
+    return 0
+
+
+def cmd_summarize_reality_audit(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.reality_audit import summarize_reality_audit
+
+    summary = summarize_reality_audit(args.annotations, args.audit_batch, args.out)
+    print(f"Reality audit summary written: {args.out}")
+    print(f"Status: {summary['status']}; audit items={summary['audit_items']}")
+    return 0
+
+
 def _arg_bool(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
@@ -1108,6 +1137,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_audit_repo_safety(args)
     if args.command == "local-status":
         return cmd_local_status(args)
+    if args.command == "export-reality-audit-100":
+        return cmd_export_reality_audit_100(args)
+    if args.command == "summarize-reality-audit":
+        return cmd_summarize_reality_audit(args)
     if args.command == "prepare-clean-run":
         return cmd_prepare_clean_run(args)
     if args.command == "build-motion-source-index":
