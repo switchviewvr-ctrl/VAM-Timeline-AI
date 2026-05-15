@@ -9,6 +9,7 @@ from vam_timeline_ai.references.handmade_import import parse_reference_filename
 from vam_timeline_ai.references.handmade_parser import classify_timeline_target
 from vam_timeline_ai.references.reference_matcher import compare_wild_to_handmade_references
 from vam_timeline_ai.semantics.domain_guards import evaluate_domain_guards
+from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_window
 from vam_timeline_ai.semantics.machine_label_proposals import _window_proposals
 from vam_timeline_ai.semantics.motion_phase_classifier import classify_motion_phase
 
@@ -97,3 +98,48 @@ def test_reference_matcher_does_not_mark_filename_labels_as_wild_truth(tmp_path)
     rows = compare_wild_to_handmade_references(wild_features, body, handmade, signatures, out, report)
     assert rows[0]["recommended_review_status"] == "likely_not_cowgirl_head_or_bj"
     assert rows[0]["is_human_ground_truth"] is False
+
+
+def test_static_or_micro_motion_detected_from_tiny_synthetic_window(tmp_path):
+    npz = tmp_path / "tiny.npz"
+    times = np.asarray([0.0, 1.0], dtype=np.float32)
+    positions = np.zeros((2, 1, 3), dtype=np.float32)
+    positions[1, 0, 1] = 0.0001
+    rotations = np.zeros((2, 1, 4), dtype=np.float32)
+    rotations[..., 3] = 1.0
+    np.savez_compressed(npz, times=times, positions=positions, rotations=rotations, controller_names=np.asarray(["headControl"], dtype=object))
+    row = {"window_id": "w", "sample_id": "s", "feature_values": {"head_motion_energy": 0.000001, "pelvis_movement_energy": 0.0}}
+    sample = {"sample_id": "s", "baked_npz_path": str(npz), "controller_names": ["headControl"]}
+    window = {"frame_start": 0, "frame_end": 2}
+    result = body_motion_quality_for_feature(row, sample, {"headControl": {"body_part": "head"}}, window, tmp_path)
+    assert result["body_motion_quality"] == "static_or_micro_motion"
+    assert result["minimal_head_motion_only"] is True
+
+
+def test_minimal_hand_jitter_detected(tmp_path):
+    npz = tmp_path / "hand.npz"
+    positions = np.zeros((3, 1, 3), dtype=np.float32)
+    positions[1, 0, 0] = 0.0002
+    rotations = np.zeros((3, 1, 4), dtype=np.float32)
+    rotations[..., 3] = 1.0
+    np.savez_compressed(npz, times=np.asarray([0.0, 0.5, 1.0], dtype=np.float32), positions=positions, rotations=rotations, controller_names=np.asarray(["lHandControl"], dtype=object))
+    row = {"window_id": "w", "sample_id": "s", "feature_values": {"left_hand_motion_energy": 0.000001, "pelvis_movement_energy": 0.0}}
+    sample = {"sample_id": "s", "baked_npz_path": str(npz), "controller_names": ["lHandControl"]}
+    result = body_motion_quality_for_feature(row, sample, {"lHandControl": {"body_part": "left_hand"}}, {"frame_start": 0, "frame_end": 3}, tmp_path)
+    assert result["minimal_hand_jitter_only"] is True
+    assert result["body_motion_quality"] == "static_or_micro_motion"
+
+
+def test_clean_cowgirl_scoring_rejects_static_micro_and_prefers_longer_windows():
+    feature = {"window_id": "w", "feature_values": {"pelvis_total_position_range": 0.2, "pelvis_movement_energy": 0.1}}
+    match = {"cowgirl_reference_score": 0.8, "recommended_review_status": "likely_cowgirl_candidate"}
+    static_body = {"body_motion_quality": "static_or_micro_motion", "static_or_micro_motion": True, "micro_motion_score": 1.0, "active_bodypart_count_above_threshold": 0}
+    rejected = score_window(feature, static_body, match, {"duration_seconds": 8.0})
+    assert rejected["clean_cowgirl_candidate"] is False
+    assert "static_or_micro_motion" in rejected["reject_reasons"]
+    good_body = {"body_motion_quality": "good_body_motion", "static_or_micro_motion": False, "micro_motion_score": 0.0, "active_bodypart_count_above_threshold": 3}
+    short = score_window(feature, good_body, match, {"duration_seconds": 2.0})
+    long = score_window(feature, good_body, match, {"duration_seconds": 4.0})
+    assert long["duration_score"] > short["duration_score"]
+    assert "too_short_for_semantic_judgment" in short["reject_reasons"]
+    assert long["clean_cowgirl_candidate"] is True

@@ -51,6 +51,9 @@ def export_semantic_review_010(
     use_body_motion_quality: bool = False,
     prefer_clean_body_motion: bool = False,
     use_handmade_reference_matches: bool = False,
+    prefer_longer_cowgirl_windows: bool = False,
+    min_cowgirl_window_seconds: float = 4.0,
+    use_cowgirl_candidate_score_v2: bool = False,
 ) -> dict[str, Any]:
     if count != 10:
         raise ValueError("semantic review MVP expects exactly 10 items")
@@ -62,8 +65,11 @@ def export_semantic_review_010(
         "use_body_motion_quality": use_body_motion_quality,
         "prefer_clean_body_motion": prefer_clean_body_motion,
         "use_handmade_reference_matches": use_handmade_reference_matches,
+        "prefer_longer_cowgirl_windows": prefer_longer_cowgirl_windows,
+        "min_cowgirl_window_seconds": min_cowgirl_window_seconds,
+        "use_cowgirl_candidate_score_v2": use_cowgirl_candidate_score_v2,
     }
-    selected = _select_10_v3(data) if (use_body_motion_quality or use_handmade_reference_matches or prefer_clean_body_motion) else _select_10(data)
+    selected = _select_10_v4(data) if use_cowgirl_candidate_score_v2 else _select_10_v3(data) if (use_body_motion_quality or use_handmade_reference_matches or prefer_clean_body_motion) else _select_10(data)
     rows: list[dict[str, Any]] = []
     export_results: list[dict[str, Any]] = []
     timeline_root = out / "timeline_segments"
@@ -159,6 +165,7 @@ def _load_data(run: Path) -> dict[str, Any]:
         "baked_audit": {r.get("sample_id"): r for r in load_jsonl(run / "audits" / "baked_sample_audit.jsonl") if r.get("sample_id")},
         "body_quality": {r.get("window_id"): r for r in load_jsonl(run / "audits" / "body_motion_quality.jsonl") if r.get("window_id")},
         "reference_matches": {r.get("window_id"): r for r in load_jsonl(run / "references" / "handmade_animations" / "wild_reference_matches.jsonl") if r.get("window_id")},
+        "cowgirl_scores_v2": {r.get("window_id"): r for r in load_jsonl(run / "audits" / "cowgirl_candidate_scores_v2.jsonl") if r.get("window_id")},
     }
 
 
@@ -235,6 +242,82 @@ def _select_10_v3(data: dict[str, Any]) -> list[dict[str, Any]]:
         fallback = _positive_candidates(data) + _borderline_candidates(data) + _negative_candidates(data)
         _enrich_candidates(fallback, data)
         _take(fallback, 10 - len(selected), selected, seen, per_scene, per_sample, strict=False)
+    if len(selected) != 10:
+        raise ValueError(f"Could not select exactly 10 examples; selected {len(selected)}")
+    return selected
+
+
+def _select_10_v4(data: dict[str, Any]) -> list[dict[str, Any]]:
+    flags = data.get("selection_flags", {})
+    min_duration = float(flags.get("min_cowgirl_window_seconds") or 4.0)
+    quotas = {
+        "likely_cowgirl_candidate": 4,
+        "transition_realign": 2,
+        "likely_head_bj_false_positive": 1,
+        "isolated_gesture": 1,
+        "doggy_other_confusion": 1,
+        "unknown_mess": 1,
+    }
+    pools = {key: [] for key in quotas}
+    for wid, score in data["cowgirl_scores_v2"].items():
+        duration = float(score.get("duration_seconds") or 0.0)
+        if score.get("clean_cowgirl_candidate") and duration >= min_duration:
+            pools["likely_cowgirl_candidate"].append(
+                _candidate(
+                    "likely_cowgirl_candidate",
+                    wid,
+                    None,
+                    float(score.get("final_clean_cowgirl_candidate_score") or 0.0),
+                    ["clean Cowgirl score v2", f"duration {duration:.1f}s", "not static/micro/head-only/root-only"],
+                    ["clean_cowgirl_candidate_v2"],
+                )
+            )
+    # If the data does not have enough long clean candidates, use shorter but mark them explicitly.
+    if len(pools["likely_cowgirl_candidate"]) < quotas["likely_cowgirl_candidate"]:
+        for wid, score in data["cowgirl_scores_v2"].items():
+            if score.get("clean_cowgirl_candidate") and wid not in {x["window_id"] for x in pools["likely_cowgirl_candidate"]}:
+                duration = float(score.get("duration_seconds") or 0.0)
+                pools["likely_cowgirl_candidate"].append(
+                    _candidate(
+                        "likely_cowgirl_candidate",
+                        wid,
+                        None,
+                        float(score.get("final_clean_cowgirl_candidate_score") or 0.0) * 0.65,
+                        ["clean Cowgirl score v2 but shorter than preferred", "too_short_for_semantic_judgment"],
+                        ["clean_cowgirl_candidate_v2", "too_short_for_semantic_judgment"],
+                    )
+                )
+    for wid, frow in data["features"].items():
+        bq = data["body_quality"].get(wid, {})
+        match = data["reference_matches"].get(wid, {})
+        phase = classify_motion_phase(frow, bq)["motion_phase_candidate"]
+        guard = evaluate_domain_guards(frow, bq)
+        status = match.get("recommended_review_status")
+        cow_score = float(match.get("cowgirl_reference_score") or 0.0)
+        head_score = max(float(match.get("bj_reference_score") or 0.0), float(match.get("head_reference_score") or 0.0))
+        doggy_score = float(match.get("doggy_reference_score") or 0.0)
+        quality = bq.get("body_motion_quality", "unknown")
+        if status == "likely_transition_or_realign" or phase == "transition_adjustment_candidate":
+            pools["transition_realign"].append(_candidate("transition_realign", wid, None, max(cow_score, 0.5), ["transition/realign-like motion", f"phase {phase}"], ["transition_adjustment_candidate"]))
+        if status == "likely_not_cowgirl_head_or_bj" or "possible_non_cowgirl_head_dominant_motion" in guard.get("domain_guard_audit_labels", []):
+            pools["likely_head_bj_false_positive"].append(_candidate("likely_head_bj_false_positive", wid, None, head_score, ["head/BJ-domain guard candidate"], ["possible_non_cowgirl_head_dominant_motion"]))
+        if status == "likely_doggy_or_other_hip_motion":
+            pools["doggy_other_confusion"].append(_candidate("doggy_other_confusion", wid, None, doggy_score, ["doggy/other hip-motion confusion candidate"], ["likely_doggy_or_other_hip_motion"]))
+        if status == "likely_isolated_gesture" or bq.get("static_or_micro_motion") or bq.get("minimal_head_motion_only") or bq.get("minimal_hand_jitter_only"):
+            pools["isolated_gesture"].append(_candidate("isolated_gesture", wid, None, max(head_score, float(match.get("hand_reference_score") or 0.0), float(bq.get("micro_motion_score") or 0.0)), ["isolated/static micro-motion candidate"], ["static_or_micro_motion" if bq.get("static_or_micro_motion") else "likely_isolated_gesture"]))
+        if status in {"root_or_controller_only_false_positive", "unknown_needs_review"} or quality in {"controller_only_whole_person_motion", "root_only_motion"}:
+            pools["unknown_mess"].append(_candidate("unknown_mess", wid, None, 1.0 if quality in {"controller_only_whole_person_motion", "root_only_motion"} else 0.4, [f"quality/status needs audit: {quality}/{status}"], [status or quality]))
+    for rows in pools.values():
+        _enrich_candidates(rows, data)
+        rows.sort(key=lambda r: float(r.get("score") or 0.0), reverse=True)
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    per_scene: Counter[str] = Counter()
+    per_sample: Counter[str] = Counter()
+    for category, quota in quotas.items():
+        _take(pools[category], quota, selected, seen, per_scene, per_sample, strict=True)
+    if len(selected) < 10:
+        _take([c for rows in pools.values() for c in rows], 10 - len(selected), selected, seen, per_scene, per_sample, strict=False)
     if len(selected) != 10:
         raise ValueError(f"Could not select exactly 10 examples; selected {len(selected)}")
     return selected
@@ -372,6 +455,7 @@ def _make_review_row(idx: int, item: dict[str, Any], data: dict[str, Any]) -> di
     silver_pair = data["silver_pairs"].get(pair.get("pair_window_id"), {}) if pair else {}
     body_quality = data["body_quality"].get(wid, {})
     reference_match = data["reference_matches"].get(wid, {})
+    cowgirl_score = data["cowgirl_scores_v2"].get(wid, {})
     phase = classify_motion_phase(frow, body_quality)
     guard = evaluate_domain_guards(frow, body_quality)
     review_id = f"review_{idx:03d}"
@@ -408,11 +492,13 @@ def _make_review_row(idx: int, item: dict[str, Any], data: dict[str, Any]) -> di
             "motion_phase_candidate": phase,
             "domain_guard_warnings": guard,
             "handmade_reference_match": reference_match,
+            "clean_cowgirl_candidate_score_v2": cowgirl_score,
         },
         "why_selected": item["why_selected"],
         "user_questions": _questions_for_item(bool(pair)),
         "answer_options": ["correct", "wrong", "unclear"],
         "is_human_ground_truth": False,
+        "export_context_padding_seconds": 0.5 if data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v2") else 0.0,
     }
 
 
@@ -495,7 +581,7 @@ def _attempt_timeline_export(row: dict[str, Any], data: dict[str, Any], out_dir:
     loaded = _load_npz_window(sample, row, data["run_dir"])
     if loaded is None:
         return _write_export_unavailable(out_dir, row, "baked NPZ missing or unreadable")
-    positions, rotations, names, times = loaded
+    positions, rotations, names, times, export_start, export_end = loaded
     positions, rotations, names, safety = _filter_safe_export_controllers(positions, rotations, names)
     if not names:
         return _write_export_unavailable(out_dir, row, "no allowed bodypart controller tracks remain after stripping Person/root/world tracks")
@@ -506,7 +592,7 @@ def _attempt_timeline_export(row: dict[str, Any], data: dict[str, Any], out_dir:
         result = _write_export_unavailable(out_dir, row, f"numeric validation failed: {validation['warnings']}")
         result["validation_status"] = validation["status"]
         return result
-    duration = float(row.get("duration_seconds") or (times[-1] - times[0] if len(times) else 0.0))
+    duration = float(times[-1] if len(times) else row.get("duration_seconds") or 0.0)
     timeline = _build_timeline_json(row["review_id"], duration, names, positions, rotations)
     roundtrip = _validate_timeline_roundtrip(timeline, positions, rotations)
     if roundtrip["status"] != "ok":
@@ -527,6 +613,10 @@ def _attempt_timeline_export(row: dict[str, Any], data: dict[str, Any], out_dir:
         "sample_id": row["sample_id"],
         "original_start_seconds": row["start_seconds"],
         "original_end_seconds": row["end_seconds"],
+        "semantic_window_start_seconds": row["start_seconds"],
+        "semantic_window_end_seconds": row["end_seconds"],
+        "exported_with_context_start_seconds": export_start,
+        "exported_with_context_end_seconds": export_end,
         "exported_duration_seconds": duration,
         "controller_names": names,
         "export_format": "AcidBubbles Timeline-style JSON, dense linear keys",
@@ -612,7 +702,7 @@ def _write_export_unavailable(out_dir: Path, row: dict[str, Any], reason: str) -
     return {"attempted": True, "success": False, "validation_status": "unavailable", "warnings": [reason], "timeline_export_path": None}
 
 
-def _load_npz_window(sample: dict[str, Any], row: dict[str, Any], run_dir: Path) -> tuple[np.ndarray, np.ndarray, list[str], np.ndarray] | None:
+def _load_npz_window(sample: dict[str, Any], row: dict[str, Any], run_dir: Path) -> tuple[np.ndarray, np.ndarray, list[str], np.ndarray, float, float] | None:
     path = Path(str(sample.get("baked_npz_path") or ""))
     if not path.is_absolute():
         project_root = run_dir.parents[2] if len(run_dir.parents) > 2 else Path.cwd()
@@ -624,10 +714,16 @@ def _load_npz_window(sample: dict[str, Any], row: dict[str, Any], run_dir: Path)
         rotations = np.asarray(data["rotations"], dtype=np.float32)
         times = np.asarray(data["times"], dtype=np.float32)
         names = [str(x) for x in data["controller_names"].tolist()]
-    start = max(0, min(int(row.get("frame_start") or 0), len(times) - 1))
-    end = max(start + 1, min(int(row.get("frame_end") or len(times)), len(times)))
+    semantic_start = max(0, min(int(row.get("frame_start") or 0), len(times) - 1))
+    semantic_end = max(semantic_start + 1, min(int(row.get("frame_end") or len(times)), len(times)))
+    fps = float(sample.get("fps") or 60.0)
+    pad_frames = int(round(float(row.get("export_context_padding_seconds") or 0.0) * fps))
+    start = max(0, semantic_start - pad_frames)
+    end = min(len(times), semantic_end + pad_frames)
     rel_times = times[start:end] - times[start]
-    return positions[start:end], _normalize_quat_continuity(rotations[start:end]), names, rel_times
+    export_start = float(times[start]) if len(times) else float(row.get("start_seconds") or 0.0)
+    export_end = float(times[end - 1]) if len(times) and end > start else float(row.get("end_seconds") or 0.0)
+    return positions[start:end], _normalize_quat_continuity(rotations[start:end]), names, rel_times, export_start, export_end
 
 
 def _build_timeline_json(review_id: str, duration: float, names: list[str], positions: np.ndarray, rotations: np.ndarray) -> dict[str, Any]:
@@ -815,6 +911,7 @@ def _item_markdown(row: dict[str, Any]) -> list[str]:
         f"- weak hints: `{', '.join(item.get('label', '') for item in evidence.get('weak_labels', [])[:6])}`",
         f"- machine proposals: `{', '.join(item.get('label', '') for item in evidence.get('machine_proposals', [])[:6])}`",
         f"- handmade reference match: `{_compact(evidence.get('handmade_reference_match', {}), 6)}`",
+        f"- clean Cowgirl score v2: `{_compact(evidence.get('clean_cowgirl_candidate_score_v2', {}), 8)}`",
         "",
         "What to check in VaM:",
         *[f"- {q}" for q in row.get("user_questions", [])],
@@ -960,12 +1057,15 @@ def _write_semantic_result(out: Path, rows: list[dict[str, Any]], status: str, c
         labels = Counter()
     if labels:
         cowgirl_true = labels.get("cowgirl_true_segment", 0)
+        possible_cowgirl = labels.get("possible_cowgirl_context", 0)
         transition = labels.get("transition_adjustment", 0)
         root_false = labels.get("controller_only_whole_person_motion", 0) + labels.get("root_only_motion_false_positive", 0)
-        if cowgirl_true <= 1 and len(rows) >= 10:
+        wrong_or_unclear = counts.get("user_verdict", Counter()).get("wrong", 0) + counts.get("user_verdict", Counter()).get("unclear", 0)
+        correct = counts.get("user_verdict", Counter()).get("correct", 0)
+        if (cowgirl_true <= 1 and len(rows) >= 10) or wrong_or_unclear > correct:
             verdict.update(
                 {
-                    "feature_semantics_trusted": "no",
+                    "feature_semantics_trusted": "no" if cowgirl_true <= 1 else "uncertain",
                     "machine_labels_trusted_for_proxy_ml": "no",
                     "proceed_to_ml": "no",
                 }
@@ -975,6 +1075,7 @@ def _write_semantic_result(out: Path, rows: list[dict[str, Any]], status: str, c
                 "## Human Review Interpretation",
                 "",
                 f"- Clear true Cowgirl positives: {cowgirl_true}/{len(rows)}",
+                f"- Possible Cowgirl context/ambiguous examples: {possible_cowgirl}",
                 f"- Transition/adjustment/in-between examples: {transition}",
                 f"- Whole-person/controller/root false positives: {root_false}",
                 "- Semantic trust is low; machine/silver labels are not ready for ML.",

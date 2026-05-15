@@ -26,6 +26,18 @@ def evaluate_domain_guards(feature_row: dict[str, Any], body_quality: dict[str, 
             audit_labels.append("controller_only_whole_person_motion")
         warnings.append("Downgrade Cowgirl: motion appears root/whole-person dominant, not limb/body-controller animation.")
         confidence_multiplier = min(confidence_multiplier, 0.25)
+    if q in {"static_or_empty", "static_or_micro_motion"} or body_quality.get("static_or_micro_motion"):
+        audit_labels.append("static_or_micro_motion")
+        warnings.append("Downgrade Cowgirl: static or micro-motion window.")
+        confidence_multiplier = min(confidence_multiplier, 0.2)
+    if body_quality.get("minimal_head_motion_only"):
+        audit_labels.append("minimal_head_motion")
+        warnings.append("Minimal head-only motion is a head gesture candidate, not Cowgirl.")
+        confidence_multiplier = min(confidence_multiplier, 0.25)
+    if body_quality.get("minimal_hand_jitter_only"):
+        audit_labels.append("minimal_hand_jitter")
+        warnings.append("Minimal hand jitter is isolated gesture/noise, not Cowgirl.")
+        confidence_multiplier = min(confidence_multiplier, 0.25)
 
     if head_energy > max(pelvis_energy, hand_energy, leg_energy, 1e-9) * 2.0 and pelvis_energy < 0.05:
         audit_labels.append("possible_non_cowgirl_head_dominant_motion")

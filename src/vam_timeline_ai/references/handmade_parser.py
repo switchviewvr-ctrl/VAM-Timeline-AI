@@ -9,6 +9,7 @@ import json
 import numpy as np
 
 from vam_timeline_ai.io.json_utils import load_jsonl, write_jsonl
+from vam_timeline_ai.motion.controller_mapping import map_controller_name
 from vam_timeline_ai.timeline.codec import decode_keyframe_sequence
 
 
@@ -151,8 +152,11 @@ def classify_timeline_target(name: str) -> str:
     token = "".join(ch for ch in str(name).lower() if ch.isalnum())
     if token in ALLOWED_BODY_CONTROLLERS:
         return "allowed_body_controller"
-    if token in DISALLOWED_ROOT_TOKENS or token.startswith("person") or token.endswith("root"):
+    if token in DISALLOWED_ROOT_TOKENS or token.startswith("person") or token.endswith("root") or "eyetarget" in token:
         return "disallowed_person_atom_or_root"
+    mapped = map_controller_name(name).get("body_part")
+    if mapped and mapped != "unknown" and token.endswith("control"):
+        return "allowed_body_controller"
     return "unknown_control"
 
 

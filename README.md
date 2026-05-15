@@ -273,6 +273,47 @@ python -m vam_timeline_ai.cli export-semantic-review-010 ^
 
 This is another semantic check, not training. Timeline exports strip unsafe Person/root/world tracks and write teleport-risk metadata. If no safe body-controller tracks remain, no fake export is created.
 
+### Semantic Review V4: Micro-Motion Filtering
+
+The V3 VaM review improved over V1 but still allowed too many static or micro-motion examples. V4 adds:
+
+- per-window bodypart displacement metrics
+- `static_or_micro_motion`
+- `minimal_head_motion_only`
+- `minimal_hand_jitter_only`
+- clean Cowgirl candidate score v2
+- 4s/8s preference for likely Cowgirl review examples
+
+Score candidates:
+
+```powershell
+python -m vam_timeline_ai.cli score-cowgirl-candidates-v2 ^
+  --run-dir data\runs\clean_v2 ^
+  --wild-reference-matches data\runs\clean_v2\references\handmade_animations\wild_reference_matches.jsonl ^
+  --body-quality data\runs\clean_v2\audits\body_motion_quality.jsonl ^
+  --features data\runs\clean_v2\features\cowgirl_window_features_v1.jsonl ^
+  --out-jsonl data\runs\clean_v2\audits\cowgirl_candidate_scores_v2.jsonl ^
+  --report data\runs\clean_v2\audits\cowgirl_candidate_score_v2_report.md
+```
+
+Export V4:
+
+```powershell
+python -m vam_timeline_ai.cli export-semantic-review-010 ^
+  --run-dir data\runs\clean_v2 ^
+  --out-dir data\runs\clean_v2\audits\semantic_review_010_v4 ^
+  --count 10 ^
+  --attempt-timeline-export true ^
+  --use-body-motion-quality true ^
+  --prefer-clean-body-motion true ^
+  --use-handmade-reference-matches true ^
+  --prefer-longer-cowgirl-windows true ^
+  --min-cowgirl-window-seconds 4 ^
+  --use-cowgirl-candidate-score-v2 true
+```
+
+V4 is still a review batch, not training data.
+
 ## Commands
 
 Print project and reference status:

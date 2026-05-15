@@ -86,6 +86,15 @@ def _window_proposals(row: dict[str, Any], window: dict[str, Any], weak: dict[st
         label = "controller_only_whole_person_motion" if body_quality == "controller_only_whole_person_motion" else "root_only_motion_false_positive"
         out.append(_proposal(meta, label, "quality", "negative", 0.86, "machine_rule_v1", "root_or_controller_only_safety_gate_v1", ["pelvis_movement_energy", "left_hand_motion_energy", "right_hand_motion_energy", "head_motion_energy"], v, warnings + body.get("warnings", [])))
         return out
+    if body_quality in {"static_or_empty", "static_or_micro_motion"} or body.get("static_or_micro_motion") or body.get("minimal_head_motion_only") or body.get("minimal_hand_jitter_only"):
+        if body.get("minimal_head_motion_only"):
+            label = "minimal_head_motion"
+        elif body.get("minimal_hand_jitter_only"):
+            label = "minimal_hand_jitter"
+        else:
+            label = "static_or_micro_motion"
+        out.append(_proposal(meta, label, "quality", "negative", 0.82, "machine_rule_v1", "static_micro_motion_safety_gate_v1", ["pelvis_movement_energy", "head_motion_energy", "left_hand_motion_energy", "right_hand_motion_energy"], v, warnings + body.get("warnings", [])))
+        return out
     if "possible_non_cowgirl_head_dominant_motion" in guard.get("domain_guard_audit_labels", []):
         out.append(_proposal(meta, "possible_non_cowgirl_head_dominant_motion", "quality", "uncertain", 0.72, "machine_rule_v1", "head_dominant_domain_guard_v1", ["head_motion_energy", "pelvis_movement_energy"], v, warnings + guard.get("domain_guard_warnings", [])))
     if phase.get("motion_phase_candidate") == "transition_adjustment_candidate":

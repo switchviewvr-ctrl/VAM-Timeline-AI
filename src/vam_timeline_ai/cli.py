@@ -68,6 +68,9 @@ def build_parser() -> argparse.ArgumentParser:
     semantic_review.add_argument("--use-body-motion-quality", default="false")
     semantic_review.add_argument("--prefer-clean-body-motion", default="false")
     semantic_review.add_argument("--use-handmade-reference-matches", default="false")
+    semantic_review.add_argument("--prefer-longer-cowgirl-windows", default="false")
+    semantic_review.add_argument("--min-cowgirl-window-seconds", type=float, default=4.0)
+    semantic_review.add_argument("--use-cowgirl-candidate-score-v2", default="false")
 
     semantic_summary = subparsers.add_parser("summarize-semantic-review-010", help="Summarize user answers for the 10-item semantic review.")
     semantic_summary.add_argument("--answers", required=True)
@@ -132,6 +135,14 @@ def build_parser() -> argparse.ArgumentParser:
     body_quality.add_argument("--controller-map", required=True)
     body_quality.add_argument("--out-jsonl", required=True)
     body_quality.add_argument("--report", required=True)
+
+    cowgirl_score = subparsers.add_parser("score-cowgirl-candidates-v2", help="Score clean Cowgirl review candidates using body quality and reference matches.")
+    cowgirl_score.add_argument("--run-dir", required=True)
+    cowgirl_score.add_argument("--wild-reference-matches", required=True)
+    cowgirl_score.add_argument("--body-quality", required=True)
+    cowgirl_score.add_argument("--features", required=True)
+    cowgirl_score.add_argument("--out-jsonl", required=True)
+    cowgirl_score.add_argument("--report", required=True)
 
     cmap = subparsers.add_parser("discover-controller-map", help="Discover controller names and conservative body-part mapping.")
     cmap.add_argument("--sample-index", required=True)
@@ -660,6 +671,16 @@ def cmd_audit_body_motion_quality(args: argparse.Namespace) -> int:
         counts[key] = counts.get(key, 0) + 1
     print(f"Body motion quality audit written: {args.out_jsonl}")
     print(f"Rows: {len(rows)}; counts: {counts}")
+    return 0
+
+
+def cmd_score_cowgirl_candidates_v2(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_cowgirl_candidates_v2
+
+    rows = score_cowgirl_candidates_v2(args.run_dir, args.wild_reference_matches, args.body_quality, args.features, args.out_jsonl, args.report)
+    clean = sum(1 for row in rows if row.get("clean_cowgirl_candidate"))
+    print(f"Cowgirl candidate scores v2 written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; clean candidates: {clean}")
     return 0
 
 
@@ -1197,6 +1218,9 @@ def cmd_export_semantic_review_010(args: argparse.Namespace) -> int:
         use_body_motion_quality=_arg_bool(args.use_body_motion_quality),
         prefer_clean_body_motion=_arg_bool(args.prefer_clean_body_motion),
         use_handmade_reference_matches=_arg_bool(args.use_handmade_reference_matches),
+        prefer_longer_cowgirl_windows=_arg_bool(args.prefer_longer_cowgirl_windows),
+        min_cowgirl_window_seconds=args.min_cowgirl_window_seconds,
+        use_cowgirl_candidate_score_v2=_arg_bool(args.use_cowgirl_candidate_score_v2),
     )
     print(f"Semantic review 010 written: {args.out_dir}")
     print(f"Review items: {summary['review_items']}; categories={summary['category_distribution']}")
@@ -1287,6 +1311,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_audit_baked(args)
     if args.command == "audit-body-motion-quality":
         return cmd_audit_body_motion_quality(args)
+    if args.command == "score-cowgirl-candidates-v2":
+        return cmd_score_cowgirl_candidates_v2(args)
     if args.command == "discover-controller-map":
         return cmd_discover_controller_map(args)
     if args.command == "extract-cowgirl-features-v1":
