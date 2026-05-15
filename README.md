@@ -253,6 +253,39 @@ See:
 - [WHY_RETRIEVAL_IS_NOT_FINAL_GENERATION.md](references/WHY_RETRIEVAL_IS_NOT_FINAL_GENERATION.md)
 - [TEXT_TO_TIMELINE_ROADMAP.md](references/TEXT_TO_TIMELINE_ROADMAP.md)
 
+### Cowgirl Motion Flow V1
+
+Motion Flow V0 proved that generated relative deltas can be played safely in VaM through a review-only player: the Person/root stays fixed, anchors can remain stable, and reset works. V0 was intentionally simple and looked like an isolated pelvis loop when tested from a standing baseline.
+
+Motion Flow V1 adds a Cowgirl-specific review baseline and a body coordination profile. It generates pelvis driver motion plus damped abdomen/chest/head followers, static knee/foot anchors, and optional hand support anchors. The oval grind profile reduces lateral-only hula-hoop motion by increasing forward/back and vertical components.
+
+This is still review-only. It is not final text-to-animation, not native Timeline export, not clip stitching, and not ML training. The review player applies generated relative deltas from the current captured VaM controller baseline.
+
+See:
+
+- [COWGIRL_MOTION_FLOW_V1.md](references/COWGIRL_MOTION_FLOW_V1.md)
+- [COWGIRL_REVIEW_BASELINE_POSE.md](references/COWGIRL_REVIEW_BASELINE_POSE.md)
+- [REVIEW_PLAYER_V1.md](references/REVIEW_PLAYER_V1.md)
+
+### Native Timeline Export
+
+The Generated Motion Review Player was a temporary debug tool. The main generated output path is native Timeline JSON:
+
+```text
+prompt -> semantic motion plan -> generated relative motion flow -> retarget/anchor safety -> native Timeline JSON
+```
+
+Native export v0 writes Timeline-like `SerializeVersion: 283` JSON with generated controller curves, not a custom review-player schema. It remains experimental until VaM Timeline import is manually confirmed. The exporter still rejects Person/root/world tracks, does not use source-world coordinates, and does not stitch clips.
+
+Native export v1 bakes generated relative motion onto a generated Cowgirl/kneeling baseline before writing Timeline keyframes. This matters because Timeline plays concrete controller targets; it does not add relative deltas to a captured baseline on its own.
+
+See:
+
+- [NATIVE_TIMELINE_EXPORT_RESEARCH.md](references/NATIVE_TIMELINE_EXPORT_RESEARCH.md)
+- [NATIVE_TIMELINE_EXPORT_FROM_GENERATED_FLOW.md](references/NATIVE_TIMELINE_EXPORT_FROM_GENERATED_FLOW.md)
+- [NATIVE_TIMELINE_EXPORT_V1_BASELINE_BAKING.md](references/NATIVE_TIMELINE_EXPORT_V1_BASELINE_BAKING.md)
+- [REVIEW_PLAYER_IS_DEBUG_ONLY.md](references/REVIEW_PLAYER_IS_DEBUG_ONLY.md)
+
 The first 10-item VaM semantic review showed that the machine/silver interpretation was not reliable enough for more ML. Only `review_010` was a clear Cowgirl segment. Several examples were transition/in-between motions, one looked head/BJ-domain rather than Cowgirl, and two were whole-controller/whole-person motion instead of real body/extremity animation.
 
 Those findings live under:
@@ -814,6 +847,55 @@ References:
 - [Coordinate Space And Teleport Safety](references/COORDINATE_SPACE_AND_TELEPORT_SAFETY.md)
 - [Why Raw Timeline Coordinates Are Not Motion](references/WHY_RAW_TIMELINE_COORDINATES_ARE_NOT_MOTION.md)
 - [Trajectory Shape Analysis](references/TRAJECTORY_SHAPE_ANALYSIS.md)
+
+## Generated Relative Motion Flow
+
+Motion primitives are now used to synthesize relative controller curves. V0 synthesis creates a generated motion flow in `relative_body_motion` space from primitive group statistics such as trajectory shape, amplitude ranges, rhythm, and controller roles.
+
+This is not Timeline export and not clip stitching. Generated flows keep `export_ready: false`, exclude Person/root/world tracks, and are technical intermediates for future retargeting and safety validation.
+
+References:
+
+- [Motion Flow Synthesis V0](references/MOTION_FLOW_SYNTHESIS_V0.md)
+- [Generated Relative Motion Flow](references/GENERATED_RELATIVE_MOTION_FLOW.md)
+
+## Pose And Partner-Relative Semantics
+
+clean_v3 introduces a fuller Semantic Action model. Motion alone is not enough:
+Cowgirl generation now tracks actor pose, motion subtype, partner relation,
+contact/support targets, phase, and generation safety as separate fields before
+combining them.
+
+BJ/oral remains a valid semantic family. Cowgirl-specific filters exclude it
+from Cowgirl generation-safe sets, but the global semantic candidate inventory
+preserves it for future BJ/oral dataset work.
+
+For prompts such as `slow cowgirl grinding, leaning forward, hands on partner
+chest`, the plan must include rider/receiver roles, partner-pelvis-local frame,
+hand targets on `partner.chest`, knees/feet anchors, and no Person/root/world
+tracks.
+
+References:
+
+- [Pose Semantics](references/POSE_SEMANTICS.md)
+- [Semantic Actions: Pose Plus Motion](references/SEMANTIC_ACTIONS_POSE_PLUS_MOTION.md)
+- [Partner-Relative Interaction Semantics](references/PARTNER_RELATIVE_INTERACTION_SEMANTICS.md)
+- [Contact Targets And Support Constraints](references/CONTACT_TARGETS_AND_SUPPORT_CONSTRAINTS.md)
+- [Prompt To Interaction Plan](references/PROMPT_TO_INTERACTION_PLAN.md)
+- [clean_v3 Semantic Rescan](references/CLEAN_V3_SEMANTIC_RESCAN.md)
+
+## First Generated Motion Review
+
+The first generated motion review layer retargets synthesized relative motion onto a synthetic neutral controller baseline. Retargeting applies generated deltas to the baseline pose, keeps foot/knee anchors stable, validates distances and jumps, and renders technical previews.
+
+Any Timeline-style artifact from this layer is review-only. It does not use source scene world coordinates, does not include Person/root tracks, does not stitch clips, and does not claim production readiness.
+
+The current review-flow JSON is not native VaM Timeline plugin JSON and is not importable through Timeline. To test generated motion in VaM, use the generated `GeneratedMotionReviewPlayer.cs` script with the review-player JSON, which applies relative deltas from the current controller baseline.
+
+References:
+
+- [Relative Flow Retargeting V0](references/RELATIVE_FLOW_RETARGETING_V0.md)
+- [First Generated Motion Review](references/FIRST_GENERATED_MOTION_REVIEW.md)
 
 ## Public GitHub Safety
 

@@ -486,6 +486,223 @@ def build_parser() -> argparse.ArgumentParser:
     flow.add_argument("--out", required=True)
     flow.add_argument("--report", required=True)
 
+    synth_flow = subparsers.add_parser("synthesize-motion-flow-v0", help="Synthesize actual relative controller curves from primitive group statistics without Timeline export.")
+    synth_flow.add_argument("--plan", required=True)
+    synth_flow.add_argument("--primitive-groups", required=True)
+    synth_flow.add_argument("--primitives", required=True)
+    synth_flow.add_argument("--out-json", required=True)
+    synth_flow.add_argument("--out-npz", required=True)
+    synth_flow.add_argument("--report", required=True)
+    synth_flow.add_argument("--duration", type=float, default=4.0)
+    synth_flow.add_argument("--fps", type=float, default=60.0)
+    synth_flow.add_argument("--seed", type=int, default=42)
+
+    synth_flow_v1 = subparsers.add_parser("synthesize-motion-flow-v1", help="Synthesize coordinated Cowgirl relative controller curves v1.")
+    synth_flow_v1.add_argument("--plan", required=True)
+    synth_flow_v1.add_argument("--primitive-groups", required=True)
+    synth_flow_v1.add_argument("--primitives", required=True)
+    synth_flow_v1.add_argument("--coordination-profile", default="cowgirl_oval_grind_v1")
+    synth_flow_v1.add_argument("--out-json", required=True)
+    synth_flow_v1.add_argument("--out-npz", required=True)
+    synth_flow_v1.add_argument("--report", required=True)
+    synth_flow_v1.add_argument("--duration", type=float, default=4.0)
+    synth_flow_v1.add_argument("--fps", type=float, default=60.0)
+    synth_flow_v1.add_argument("--seed", type=int, default=42)
+    synth_flow_v1.add_argument("--tempo", default="slow")
+    synth_flow_v1.add_argument("--vertical-scale", type=float, default=1.25)
+    synth_flow_v1.add_argument("--lateral-scale", type=float, default=0.70)
+    synth_flow_v1.add_argument("--forward-back-scale", type=float, default=1.0)
+    synth_flow_v1.add_argument("--chest-follower-scale", type=float, default=0.35)
+
+    validate_flow = subparsers.add_parser("validate-generated-motion-flow-v0", help="Validate synthesized relative generated motion flow safety.")
+    validate_flow.add_argument("--flow", required=True)
+    validate_flow.add_argument("--out", required=True)
+
+    preview_flow = subparsers.add_parser("render-generated-motion-preview-v0", help="Render technical preview plots for generated relative motion flow.")
+    preview_flow.add_argument("--flow", required=True)
+    preview_flow.add_argument("--out-dir", required=True)
+
+    baseline_pose = subparsers.add_parser("create-synthetic-baseline-pose-v0", help="Create a synthetic neutral body-controller baseline pose for review retargeting.")
+    baseline_pose.add_argument("--out", required=True)
+
+    cowgirl_baseline = subparsers.add_parser("create-cowgirl-review-baseline-pose-v1", help="Create a synthetic Cowgirl kneeling/forward review baseline pose.")
+    cowgirl_baseline.add_argument("--out", required=True)
+    cowgirl_baseline.add_argument("--style", default="kneeling_forward")
+
+    retarget_flow = subparsers.add_parser("retarget-motion-flow-v0", help="Retarget generated relative motion flow onto a baseline pose without source world coordinates.")
+    retarget_flow.add_argument("--flow", required=True)
+    retarget_flow.add_argument("--baseline-pose", required=True)
+    retarget_flow.add_argument("--out-json", required=True)
+    retarget_flow.add_argument("--out-npz", required=True)
+    retarget_flow.add_argument("--report", required=True)
+
+    retarget_flow_v1 = subparsers.add_parser("retarget-motion-flow-v1", help="Retarget generated Cowgirl motion flow v1 onto Cowgirl review baseline.")
+    retarget_flow_v1.add_argument("--flow", required=True)
+    retarget_flow_v1.add_argument("--baseline-pose", required=True)
+    retarget_flow_v1.add_argument("--out-json", required=True)
+    retarget_flow_v1.add_argument("--out-npz", required=True)
+    retarget_flow_v1.add_argument("--report", required=True)
+
+    validate_retarget = subparsers.add_parser("validate-retargeted-motion-flow-v0", help="Validate baseline-retargeted generated motion flow.")
+    validate_retarget.add_argument("--retargeted-flow", required=True)
+    validate_retarget.add_argument("--out", required=True)
+
+    validate_retarget_v1 = subparsers.add_parser("validate-retargeted-motion-flow-v1", help="Validate Cowgirl retargeted generated motion flow v1.")
+    validate_retarget_v1.add_argument("--retargeted-flow", required=True)
+    validate_retarget_v1.add_argument("--out", required=True)
+
+    preview_retarget = subparsers.add_parser("render-retargeted-motion-preview-v0", help="Render preview plots for a retargeted generated motion flow.")
+    preview_retarget.add_argument("--retargeted-flow", required=True)
+    preview_retarget.add_argument("--out-dir", required=True)
+
+    preview_retarget_v1 = subparsers.add_parser("render-retargeted-motion-preview-v1", help="Render enhanced preview plots for retargeted Cowgirl motion flow v1.")
+    preview_retarget_v1.add_argument("--retargeted-flow", required=True)
+    preview_retarget_v1.add_argument("--out-dir", required=True)
+
+    export_retarget = subparsers.add_parser("export-retargeted-flow-timeline-v0", help="Export review-flow JSON from retargeted generated motion. This is not native Timeline JSON.")
+    export_retarget.add_argument("--retargeted-flow", required=True)
+    export_retarget.add_argument("--validation", required=True)
+    export_retarget.add_argument("--out-dir", required=True)
+
+    review_player = subparsers.add_parser("export-generated-flow-for-vam-review", help="Export retargeted flow as JSON for the VaM Generated Motion Review Player.")
+    review_player.add_argument("--retargeted-flow", required=True)
+    review_player.add_argument("--out", required=True)
+    review_player.add_argument("--report", required=True)
+
+    review_player_v1 = subparsers.add_parser("export-generated-flow-for-vam-review-v1", help="Export retargeted Cowgirl v1 flow as JSON for VaM review player.")
+    review_player_v1.add_argument("--retargeted-flow", required=True)
+    review_player_v1.add_argument("--out", required=True)
+    review_player_v1.add_argument("--report", required=True)
+
+    prepare_review_player = subparsers.add_parser("prepare-vam-review-player-v0", help="Prepare VaM review player JSON, C# script, and user instructions.")
+    prepare_review_player.add_argument("--retargeted-flow", required=True)
+    prepare_review_player.add_argument("--out-dir", required=True)
+
+    first_review = subparsers.add_parser("run-first-generated-motion-review-v0", help="Run the first generated motion review prototype pipeline.")
+    first_review.add_argument("--plan", required=True)
+    first_review.add_argument("--primitive-groups", required=True)
+    first_review.add_argument("--primitives", required=True)
+    first_review.add_argument("--out-dir", required=True)
+    first_review.add_argument("--duration", type=float, default=4.0)
+    first_review.add_argument("--fps", type=float, default=60.0)
+    first_review.add_argument("--seed", type=int, default=42)
+
+    cowgirl_v1_review = subparsers.add_parser("run-cowgirl-motion-flow-v1-review", help="Run the Cowgirl motion flow v1 review pipeline.")
+    cowgirl_v1_review.add_argument("--plan", required=True)
+    cowgirl_v1_review.add_argument("--primitive-groups", required=True)
+    cowgirl_v1_review.add_argument("--primitives", required=True)
+    cowgirl_v1_review.add_argument("--out-dir", required=True)
+    cowgirl_v1_review.add_argument("--duration", type=float, default=4.0)
+    cowgirl_v1_review.add_argument("--fps", type=float, default=60.0)
+    cowgirl_v1_review.add_argument("--seed", type=int, default=42)
+
+    native_timeline = subparsers.add_parser("export-generated-flow-native-timeline-v0", help="Export retargeted generated flow as native AcidBubbles Timeline JSON.")
+    native_timeline.add_argument("--retargeted-flow", required=True)
+    native_timeline.add_argument("--out", required=True)
+    native_timeline.add_argument("--report", required=True)
+
+    native_timeline_v1 = subparsers.add_parser("export-generated-flow-native-timeline-v1", help="Export baseline-baked generated flow as native AcidBubbles Timeline JSON v1.")
+    native_timeline_v1.add_argument("--retargeted-flow", required=True)
+    native_timeline_v1.add_argument("--baseline-pose", required=True)
+    native_timeline_v1.add_argument("--out", required=True)
+    native_timeline_v1.add_argument("--report", required=True)
+    native_timeline_v1.add_argument("--include-baseline-keyframe", default="true")
+    native_timeline_v1.add_argument("--include-rotation-tracks", default="true")
+
+    native_timeline_validate = subparsers.add_parser("validate-native-timeline-export-v0", help="Validate generated native Timeline JSON structure.")
+    native_timeline_validate.add_argument("--timeline", required=True)
+    native_timeline_validate.add_argument("--report", required=True)
+
+    native_timeline_validate_v1 = subparsers.add_parser("validate-native-timeline-export-v1", help="Validate generated native Timeline JSON v1 baseline baking.")
+    native_timeline_validate_v1.add_argument("--timeline", required=True)
+    native_timeline_validate_v1.add_argument("--baseline-pose", required=True)
+    native_timeline_validate_v1.add_argument("--report", required=True)
+
+    native_timeline_review = subparsers.add_parser("run-native-timeline-export-review-v0", help="Export, validate, and write instructions for native Timeline import review.")
+    native_timeline_review.add_argument("--retargeted-flow", required=True)
+    native_timeline_review.add_argument("--out-dir", required=True)
+
+    native_timeline_review_v1 = subparsers.add_parser("run-native-timeline-export-review-v1", help="Export, validate, and write instructions for baseline-baked native Timeline import review v1.")
+    native_timeline_review_v1.add_argument("--retargeted-flow", required=True)
+    native_timeline_review_v1.add_argument("--baseline-pose", required=True)
+    native_timeline_review_v1.add_argument("--out-dir", required=True)
+
+    pose_features_v0 = subparsers.add_parser("extract-pose-features-v0", help="Extract pose feature proxies for clean_v3 semantic rescan.")
+    pose_features_v0.add_argument("--relative-index", required=True)
+    pose_features_v0.add_argument("--body-quality", required=True)
+    pose_features_v0.add_argument("--pose-anchor-completeness", required=True)
+    pose_features_v0.add_argument("--controller-validity", required=True)
+    pose_features_v0.add_argument("--out-jsonl", required=True)
+    pose_features_v0.add_argument("--report", required=True)
+
+    classify_poses_v0 = subparsers.add_parser("classify-poses-v0", help="Classify pose semantics separately from motion semantics.")
+    classify_poses_v0.add_argument("--pose-features", required=True)
+    classify_poses_v0.add_argument("--relative-reference-matches", required=False, default=None)
+    classify_poses_v0.add_argument("--handmade-features", required=False, default=None)
+    classify_poses_v0.add_argument("--out-jsonl", required=True)
+    classify_poses_v0.add_argument("--report", required=True)
+
+    partner_features_v0 = subparsers.add_parser("extract-partner-relative-features-v0", help="Extract partner-relative interaction/contact feature proxies.")
+    partner_features_v0.add_argument("--pair-windows", required=True)
+    partner_features_v0.add_argument("--pair-features", required=True)
+    partner_features_v0.add_argument("--relative-index", required=True)
+    partner_features_v0.add_argument("--pose-semantics", required=True)
+    partner_features_v0.add_argument("--out-jsonl", required=True)
+    partner_features_v0.add_argument("--report", required=True)
+
+    classify_interactions_v0 = subparsers.add_parser("classify-interactions-v0", help="Classify partner-relative interaction semantics.")
+    classify_interactions_v0.add_argument("--partner-relative-features", required=True)
+    classify_interactions_v0.add_argument("--pose-semantics", required=True)
+    classify_interactions_v0.add_argument("--semantic-actions", required=False, default=None)
+    classify_interactions_v0.add_argument("--out-jsonl", required=True)
+    classify_interactions_v0.add_argument("--report", required=True)
+
+    semantic_actions_v0 = subparsers.add_parser("build-semantic-actions-v0", help="Build Semantic Action candidates from pose, motion, interaction, and contact evidence.")
+    semantic_actions_v0.add_argument("--candidate-db", required=True)
+    semantic_actions_v0.add_argument("--pose-semantics", required=True)
+    semantic_actions_v0.add_argument("--relative-reference-matches", required=False, default=None)
+    semantic_actions_v0.add_argument("--interaction-semantics", required=True)
+    semantic_actions_v0.add_argument("--out-jsonl", required=True)
+    semantic_actions_v0.add_argument("--report", required=True)
+
+    cowgirl_v5 = subparsers.add_parser("build-cowgirl-candidate-db-v5", help="Build Cowgirl DB v5 from clean_v3 Semantic Candidate DB.")
+    cowgirl_v5.add_argument("--semantic-candidate-db", required=True)
+    cowgirl_v5.add_argument("--out-jsonl", required=True)
+    cowgirl_v5.add_argument("--out-csv", required=True)
+    cowgirl_v5.add_argument("--report", required=True)
+
+    primitives_v1 = subparsers.add_parser("extract-cowgirl-motion-primitives-v1", help="Extract Cowgirl primitives with pose/partner/contact requirements.")
+    primitives_v1.add_argument("--candidate-db", required=True)
+    primitives_v1.add_argument("--relative-features", required=True)
+    primitives_v1.add_argument("--trajectory-features", required=True)
+    primitives_v1.add_argument("--pose-semantics", required=True)
+    primitives_v1.add_argument("--interaction-semantics", required=True)
+    primitives_v1.add_argument("--out-jsonl", required=True)
+    primitives_v1.add_argument("--out-report", required=True)
+
+    draft_plan_v1 = subparsers.add_parser("draft-motion-plan-v1", help="Draft a pose/partner/contact-aware semantic motion plan.")
+    draft_plan_v1.add_argument("--prompt", required=True)
+    draft_plan_v1.add_argument("--out", required=True)
+
+    interaction_baseline = subparsers.add_parser("select-interaction-baseline-for-plan-v0", help="Create a synthetic partner-relative baseline for a motion plan.")
+    interaction_baseline.add_argument("--plan", required=True)
+    interaction_baseline.add_argument("--out", required=True)
+
+    partner_flow = subparsers.add_parser("synthesize-partner-relative-flow-v0", help="Synthesize partner-relative flow with contact/support constraints.")
+    partner_flow.add_argument("--plan", required=True)
+    partner_flow.add_argument("--primitive-groups", required=True)
+    partner_flow.add_argument("--baseline", required=True)
+    partner_flow.add_argument("--out-json", required=True)
+    partner_flow.add_argument("--report", required=True)
+
+    validate_partner_flow = subparsers.add_parser("validate-partner-relative-flow-v0", help="Validate partner-relative contact/support constraints.")
+    validate_partner_flow.add_argument("--flow", required=True)
+    validate_partner_flow.add_argument("--out", required=True)
+
+    semantic_rescan = subparsers.add_parser("run-semantic-rescan-v1", help="Run clean_v3 semantic rescan: pose + motion + partner interaction + contact.")
+    semantic_rescan.add_argument("--source-run", required=True)
+    semantic_rescan.add_argument("--out-run", required=True)
+
     cmap = subparsers.add_parser("discover-controller-map", help="Discover controller names and conservative body-part mapping.")
     cmap.add_argument("--sample-index", required=True)
     cmap.add_argument("--out", required=True)
@@ -1600,6 +1817,384 @@ def cmd_generate_motion_flow_skeleton_v0(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_synthesize_motion_flow_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.motion_flow_synthesis import synthesize_motion_flow_v0
+
+    flow = synthesize_motion_flow_v0(
+        args.plan,
+        args.primitive_groups,
+        args.primitives,
+        args.out_json,
+        args.out_npz,
+        args.report,
+        duration=args.duration,
+        fps=args.fps,
+        seed=args.seed,
+    )
+    print(f"Generated motion flow v0 written: {args.out_json}")
+    print(f"Flow: {flow.get('flow_id')}; group={flow.get('selected_primitive_group')}; export_ready={flow.get('export_ready')}")
+    return 0
+
+
+def cmd_synthesize_motion_flow_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.motion_flow_synthesis import synthesize_motion_flow_v1
+
+    flow = synthesize_motion_flow_v1(
+        args.plan,
+        args.primitive_groups,
+        args.primitives,
+        args.coordination_profile,
+        args.out_json,
+        args.out_npz,
+        args.report,
+        duration=args.duration,
+        fps=args.fps,
+        seed=args.seed,
+        tempo=args.tempo,
+        vertical_scale=args.vertical_scale,
+        lateral_scale=args.lateral_scale,
+        forward_back_scale=args.forward_back_scale,
+        chest_follower_scale=args.chest_follower_scale,
+    )
+    print(f"Generated motion flow v1 written: {args.out_json}")
+    print(f"Flow: {flow.get('flow_id')}; controllers={len(flow.get('controller_tracks', []) or [])}; profile={args.coordination_profile}")
+    return 0
+
+
+def cmd_validate_generated_motion_flow_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.generated_motion_validation import validate_generated_motion_flow_v0
+
+    result = validate_generated_motion_flow_v0(args.flow, args.out)
+    print(f"Generated motion flow validation written: {args.out}")
+    print(f"Passed: {result.get('passed')}; safe_for_timeline_export={result.get('safe_for_timeline_export')}")
+    return 0 if result.get("passed") else 1
+
+
+def cmd_render_generated_motion_preview_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.visualization.generated_motion_preview import render_generated_motion_preview_v0
+
+    manifest = render_generated_motion_preview_v0(args.flow, args.out_dir)
+    print(f"Generated motion preview written: {args.out_dir}")
+    print(f"Status: {manifest.get('status')}; files={len(manifest.get('files', []))}")
+    return 0
+
+
+def cmd_create_synthetic_baseline_pose_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.baseline_pose import create_synthetic_baseline_pose_v0
+
+    data = create_synthetic_baseline_pose_v0(args.out)
+    print(f"Synthetic baseline pose v0 written: {args.out}")
+    print(f"Baseline: {data.get('baseline_id')}; controllers={len(data.get('controller_poses', []) or [])}")
+    return 0
+
+
+def cmd_create_cowgirl_review_baseline_pose_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.baseline_pose import create_cowgirl_review_baseline_pose_v1
+
+    data = create_cowgirl_review_baseline_pose_v1(args.out, args.style)
+    print(f"Cowgirl review baseline pose v1 written: {args.out}")
+    print(f"Baseline: {data.get('baseline_id')}; style={data.get('style')}; controllers={len(data.get('controller_poses', []) or [])}")
+    return 0
+
+
+def cmd_retarget_motion_flow_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.relative_flow_retargeter import retarget_motion_flow_v0
+
+    data = retarget_motion_flow_v0(args.flow, args.baseline_pose, args.out_json, args.out_npz, args.report)
+    print(f"Retargeted motion flow v0 written: {args.out_json}")
+    print(f"Flow: {data.get('flow_id')}; controllers={len(data.get('controller_tracks', []) or [])}; review_candidate={data.get('safe_for_review_export_candidate')}")
+    return 0
+
+
+def cmd_retarget_motion_flow_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.relative_flow_retargeter import retarget_motion_flow_v1
+
+    data = retarget_motion_flow_v1(args.flow, args.baseline_pose, args.out_json, args.out_npz, args.report)
+    print(f"Retargeted motion flow v1 written: {args.out_json}")
+    print(f"Flow: {data.get('flow_id')}; baseline_style={data.get('baseline_style')}; controllers={len(data.get('controller_tracks', []) or [])}")
+    return 0
+
+
+def cmd_validate_retargeted_motion_flow_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.retarget_validation import validate_retargeted_motion_flow_v0
+
+    result = validate_retargeted_motion_flow_v0(args.retargeted_flow, args.out)
+    print(f"Retargeted motion flow validation written: {args.out}")
+    print(f"Passed: {result.get('passed')}; review_candidate={result.get('export_review_safe_candidate')}; generation_candidate={result.get('generation_template_candidate')}")
+    return 0 if result.get("passed") else 1
+
+
+def cmd_validate_retargeted_motion_flow_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.retarget_validation import validate_retargeted_motion_flow_v1
+
+    result = validate_retargeted_motion_flow_v1(args.retargeted_flow, args.out)
+    print(f"Retargeted motion flow v1 validation written: {args.out}")
+    print(f"Passed: {result.get('passed')}; review_candidate={result.get('export_review_safe_candidate')}")
+    return 0 if result.get("passed") else 1
+
+
+def cmd_render_retargeted_motion_preview_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.visualization.retargeted_motion_preview import render_retargeted_motion_preview_v0
+
+    manifest = render_retargeted_motion_preview_v0(args.retargeted_flow, args.out_dir)
+    print(f"Retargeted motion preview written: {args.out_dir}")
+    print(f"Status: {manifest.get('status')}; files={len(manifest.get('files', []))}")
+    return 0
+
+
+def cmd_render_retargeted_motion_preview_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.visualization.retargeted_motion_preview import render_retargeted_motion_preview_v1
+
+    manifest = render_retargeted_motion_preview_v1(args.retargeted_flow, args.out_dir)
+    print(f"Retargeted motion preview v1 written: {args.out_dir}")
+    print(f"Status: {manifest.get('status')}; files={len(manifest.get('files', []))}")
+    return 0
+
+
+def cmd_export_retargeted_flow_timeline_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.timeline_from_retargeted_flow import export_retargeted_flow_timeline_v0
+
+    result = export_retargeted_flow_timeline_v0(args.retargeted_flow, args.validation, args.out_dir)
+    print(f"Retargeted review-flow JSON status: {result.get('status')}")
+    if result.get("timeline_json"):
+        print(f"Review-flow JSON (not native Timeline): {result.get('timeline_json')}")
+    return 0
+
+
+def cmd_export_generated_flow_for_vam_review(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.review_player_export import export_generated_flow_for_vam_review
+
+    data = export_generated_flow_for_vam_review(args.retargeted_flow, args.out, args.report)
+    print(f"VaM review player JSON written: {args.out}")
+    print(f"Controllers: {len(data.get('controllers', []) or [])}; native_timeline_importable={data.get('native_timeline_importable')}")
+    return 0
+
+
+def cmd_export_generated_flow_for_vam_review_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.review_player_export import export_generated_flow_for_vam_review_v1
+
+    data = export_generated_flow_for_vam_review_v1(args.retargeted_flow, args.out, args.report)
+    print(f"VaM review player JSON v1 written: {args.out}")
+    print(f"Controllers: {len(data.get('controllers', []) or [])}; schema={data.get('schema')}")
+    return 0
+
+
+def cmd_prepare_vam_review_player_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.review_player_export import prepare_vam_review_player_v0
+
+    summary = prepare_vam_review_player_v0(args.retargeted_flow, args.out_dir)
+    print(f"VaM review player package written: {args.out_dir}")
+    print(f"JSON: {summary.get('review_player_json')}")
+    print(f"Script source: {summary.get('script_source')}")
+    if summary.get("script_copied_to"):
+        print(f"Script copied to: {summary.get('script_copied_to')}")
+    return 0
+
+
+def cmd_run_first_generated_motion_review_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.first_generated_motion_review import run_first_generated_motion_review_v0
+
+    summary = run_first_generated_motion_review_v0(args.plan, args.primitive_groups, args.primitives, args.out_dir, args.duration, args.fps, args.seed)
+    print(f"First generated motion review v0 written: {args.out_dir}")
+    print(f"Generated validation={summary.get('generated_flow_validation_passed')}; retarget validation={summary.get('retarget_validation_passed')}; export={(summary.get('timeline_export') or {}).get('status')}")
+    return 0
+
+
+def cmd_run_cowgirl_motion_flow_v1_review(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.first_generated_motion_review import run_cowgirl_motion_flow_v1_review
+
+    summary = run_cowgirl_motion_flow_v1_review(args.plan, args.primitive_groups, args.primitives, args.out_dir, args.duration, args.fps, args.seed)
+    print(f"Cowgirl motion flow v1 review written: {args.out_dir}")
+    print(f"Validation={summary.get('validation_passed')}; JSON={summary.get('review_player_json')}; secure_path={summary.get('review_player_secure_path')}")
+    return 0
+
+
+def cmd_export_generated_flow_native_timeline_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.native_timeline_exporter import export_generated_flow_native_timeline_v0
+
+    data = export_generated_flow_native_timeline_v0(args.retargeted_flow, args.out, args.report)
+    clip = (data.get("Clips") or [{}])[0]
+    print(f"Native Timeline JSON written: {args.out}")
+    print(f"Animation={clip.get('AnimationName')}; controllers={len(clip.get('Controllers', []) or [])}")
+    return 0
+
+
+def cmd_export_generated_flow_native_timeline_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.native_timeline_exporter import export_generated_flow_native_timeline_v1
+
+    data = export_generated_flow_native_timeline_v1(
+        args.retargeted_flow,
+        args.baseline_pose,
+        args.out,
+        args.report,
+        include_baseline_keyframe=_arg_bool(args.include_baseline_keyframe),
+        include_rotation_tracks=_arg_bool(args.include_rotation_tracks),
+    )
+    clip = (data.get("Clips") or [{}])[0]
+    meta = data.get("VAMTimelineAIGeneratedMetadata") or {}
+    print(f"Native Timeline JSON v1 written: {args.out}")
+    print(f"Animation={clip.get('AnimationName')}; controllers={len(clip.get('Controllers', []) or [])}; baseline_keyframe={meta.get('includes_baseline_keyframe')}; rotations={meta.get('includes_rotation_tracks')}")
+    return 0
+
+
+def cmd_validate_native_timeline_export_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.native_timeline_validation import validate_native_timeline_export_v0
+
+    result = validate_native_timeline_export_v0(args.timeline, args.report)
+    print(f"Native Timeline validation written: {args.report}")
+    print(f"Passed={result.get('passed')}; expected_importable={result.get('expected_importable')}")
+    return 0 if result.get("passed") else 1
+
+
+def cmd_validate_native_timeline_export_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.native_timeline_validation import validate_native_timeline_export_v1
+
+    result = validate_native_timeline_export_v1(args.timeline, args.baseline_pose, args.report)
+    print(f"Native Timeline validation v1 written: {args.report}")
+    print(f"Passed={result.get('passed')}; expected_importable={result.get('expected_importable')}; pose_context={result.get('expected_pose_context')}")
+    return 0 if result.get("passed") else 1
+
+
+def cmd_run_native_timeline_export_review_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.native_timeline_exporter import run_native_timeline_export_review_v0
+
+    summary = run_native_timeline_export_review_v0(args.retargeted_flow, args.out_dir)
+    print(f"Native Timeline export review written: {args.out_dir}")
+    print(f"Timeline={summary.get('timeline')}; validation={summary.get('validation_passed')}; expected_importable={summary.get('expected_importable')}")
+    return 0 if summary.get("validation_passed") else 1
+
+
+def cmd_run_native_timeline_export_review_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.native_timeline_exporter import run_native_timeline_export_review_v1
+
+    summary = run_native_timeline_export_review_v1(args.retargeted_flow, args.baseline_pose, args.out_dir)
+    print(f"Native Timeline export review v1 written: {args.out_dir}")
+    print(f"Timeline={summary.get('timeline')}; validation={summary.get('validation_passed')}; expected_importable={summary.get('expected_importable')}; pose_context={summary.get('expected_pose_context')}")
+    return 0 if summary.get("validation_passed") else 1
+
+
+def cmd_extract_pose_features_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.features.pose_features import extract_pose_features_v0
+
+    rows = extract_pose_features_v0(args.relative_index, args.body_quality, args.pose_anchor_completeness, args.controller_validity, args.out_jsonl, args.report)
+    print(f"Pose features v0 written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}")
+    return 0
+
+
+def cmd_classify_poses_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.pose_classifier import classify_poses_v0
+
+    rows = classify_poses_v0(args.pose_features, args.relative_reference_matches, args.handmade_features, args.out_jsonl, args.report)
+    families: dict[str, int] = {}
+    for row in rows:
+        family = str(row.get("pose_family") or "unknown")
+        families[family] = families.get(family, 0) + 1
+    print(f"Pose semantics v0 written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; families: {families}")
+    return 0
+
+
+def cmd_extract_partner_relative_features_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.features.partner_relative_features import extract_partner_relative_features_v0
+
+    rows = extract_partner_relative_features_v0(args.pair_windows, args.pair_features, args.relative_index, args.pose_semantics, args.out_jsonl, args.report)
+    print(f"Partner-relative features v0 written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}")
+    return 0
+
+
+def cmd_classify_interactions_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.interaction_classifier import classify_interactions_v0
+
+    rows = classify_interactions_v0(args.partner_relative_features, args.pose_semantics, args.semantic_actions, args.out_jsonl, args.report)
+    families: dict[str, int] = {}
+    for row in rows:
+        family = str(row.get("interaction_family") or "unknown")
+        families[family] = families.get(family, 0) + 1
+    print(f"Interaction semantics v0 written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; families: {families}")
+    return 0
+
+
+def cmd_build_semantic_actions_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.semantic_action import build_semantic_actions_v0
+
+    rows = build_semantic_actions_v0(args.candidate_db, args.pose_semantics, args.relative_reference_matches, args.interaction_semantics, args.out_jsonl, args.report)
+    families: dict[str, int] = {}
+    for row in rows:
+        family = str(row.get("semantic_family") or "unknown")
+        families[family] = families.get(family, 0) + 1
+    print(f"Semantic actions v0 written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; families: {families}")
+    return 0
+
+
+def cmd_build_cowgirl_candidate_db_v5(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.datasets.cowgirl_candidate_database import build_cowgirl_candidate_db_v5
+
+    rows = build_cowgirl_candidate_db_v5(args.semantic_candidate_db, args.out_jsonl, args.out_csv, args.report)
+    safe = sum(1 for row in rows if row.get("generation_safe"))
+    print(f"Cowgirl candidate DB v5 written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; generation_safe: {safe}")
+    return 0
+
+
+def cmd_extract_cowgirl_motion_primitives_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.primitive_extractor import extract_cowgirl_motion_primitives_v1
+
+    rows = extract_cowgirl_motion_primitives_v1(args.candidate_db, args.relative_features, args.trajectory_features, args.pose_semantics, args.interaction_semantics, args.out_jsonl, args.out_report)
+    print(f"Cowgirl motion primitives v1 written: {args.out_jsonl}")
+    print(f"Primitives: {len(rows)}")
+    return 0
+
+
+def cmd_draft_motion_plan_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.prompt_to_plan import draft_motion_plan_v1
+
+    plan = draft_motion_plan_v1(args.prompt, args.out)
+    phase = (plan.get("sequence") or [{}])[0]
+    print(f"Draft motion plan v1 written: {args.out}")
+    print(f"Family={plan.get('family')}; pose={plan.get('requested_pose_subtype')}; support={(phase.get('interaction') or {}).get('support_mode')}")
+    return 0
+
+
+def cmd_select_interaction_baseline_for_plan_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.baseline_pose import select_interaction_baseline_for_plan_v0
+
+    baseline = select_interaction_baseline_for_plan_v0(args.plan, args.out)
+    print(f"Interaction baseline written: {args.out}")
+    print(f"Baseline={baseline.get('baseline_id')}; support={baseline.get('support_mode')}; partner_refs={len(baseline.get('partner_references') or {})}")
+    return 0
+
+
+def cmd_synthesize_partner_relative_flow_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.partner_relative_flow import synthesize_partner_relative_flow_v0
+
+    flow = synthesize_partner_relative_flow_v0(args.plan, args.primitive_groups, args.baseline, args.out_json, args.report)
+    print(f"Partner-relative flow v0 written: {args.out_json}")
+    print(f"Flow={flow.get('flow_id')}; support={flow.get('support_mode')}; controllers={len(flow.get('controller_tracks') or [])}")
+    return 0
+
+
+def cmd_validate_partner_relative_flow_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.interaction_validation import validate_partner_relative_flow_v0
+
+    result = validate_partner_relative_flow_v0(args.flow, args.out)
+    print(f"Partner-relative validation written: {args.out}")
+    print(f"Passed={result.get('passed')}; contact_constraints_valid={result.get('contact_constraints_valid')}")
+    return 0 if result.get("passed") else 1
+
+
+def cmd_run_semantic_rescan_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.runs.semantic_rescan_v1 import run_semantic_rescan_v1
+
+    summary = run_semantic_rescan_v1(args.source_run, args.out_run)
+    print(f"Semantic rescan v1 written: {args.out_run}")
+    print(f"Motion primitives v1: {summary.get('motion_primitive_v1_count')}; review_v15={(summary.get('review_v15') or {}).get('count')}; validation={summary.get('partner_relative_flow_validation_passed')}")
+    return 0
+
+
 def cmd_discover_controller_map(args: argparse.Namespace) -> int:
     from vam_timeline_ai.motion.controller_mapping import discover_controller_map
 
@@ -2333,6 +2928,78 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_retrieve_primitives_for_plan_v0(args)
     if args.command == "generate-motion-flow-skeleton-v0":
         return cmd_generate_motion_flow_skeleton_v0(args)
+    if args.command == "synthesize-motion-flow-v0":
+        return cmd_synthesize_motion_flow_v0(args)
+    if args.command == "synthesize-motion-flow-v1":
+        return cmd_synthesize_motion_flow_v1(args)
+    if args.command == "validate-generated-motion-flow-v0":
+        return cmd_validate_generated_motion_flow_v0(args)
+    if args.command == "render-generated-motion-preview-v0":
+        return cmd_render_generated_motion_preview_v0(args)
+    if args.command == "create-synthetic-baseline-pose-v0":
+        return cmd_create_synthetic_baseline_pose_v0(args)
+    if args.command == "create-cowgirl-review-baseline-pose-v1":
+        return cmd_create_cowgirl_review_baseline_pose_v1(args)
+    if args.command == "retarget-motion-flow-v0":
+        return cmd_retarget_motion_flow_v0(args)
+    if args.command == "retarget-motion-flow-v1":
+        return cmd_retarget_motion_flow_v1(args)
+    if args.command == "validate-retargeted-motion-flow-v0":
+        return cmd_validate_retargeted_motion_flow_v0(args)
+    if args.command == "validate-retargeted-motion-flow-v1":
+        return cmd_validate_retargeted_motion_flow_v1(args)
+    if args.command == "render-retargeted-motion-preview-v0":
+        return cmd_render_retargeted_motion_preview_v0(args)
+    if args.command == "render-retargeted-motion-preview-v1":
+        return cmd_render_retargeted_motion_preview_v1(args)
+    if args.command == "export-retargeted-flow-timeline-v0":
+        return cmd_export_retargeted_flow_timeline_v0(args)
+    if args.command == "export-generated-flow-for-vam-review":
+        return cmd_export_generated_flow_for_vam_review(args)
+    if args.command == "export-generated-flow-for-vam-review-v1":
+        return cmd_export_generated_flow_for_vam_review_v1(args)
+    if args.command == "prepare-vam-review-player-v0":
+        return cmd_prepare_vam_review_player_v0(args)
+    if args.command == "run-first-generated-motion-review-v0":
+        return cmd_run_first_generated_motion_review_v0(args)
+    if args.command == "run-cowgirl-motion-flow-v1-review":
+        return cmd_run_cowgirl_motion_flow_v1_review(args)
+    if args.command == "export-generated-flow-native-timeline-v0":
+        return cmd_export_generated_flow_native_timeline_v0(args)
+    if args.command == "export-generated-flow-native-timeline-v1":
+        return cmd_export_generated_flow_native_timeline_v1(args)
+    if args.command == "validate-native-timeline-export-v0":
+        return cmd_validate_native_timeline_export_v0(args)
+    if args.command == "validate-native-timeline-export-v1":
+        return cmd_validate_native_timeline_export_v1(args)
+    if args.command == "run-native-timeline-export-review-v0":
+        return cmd_run_native_timeline_export_review_v0(args)
+    if args.command == "run-native-timeline-export-review-v1":
+        return cmd_run_native_timeline_export_review_v1(args)
+    if args.command == "extract-pose-features-v0":
+        return cmd_extract_pose_features_v0(args)
+    if args.command == "classify-poses-v0":
+        return cmd_classify_poses_v0(args)
+    if args.command == "extract-partner-relative-features-v0":
+        return cmd_extract_partner_relative_features_v0(args)
+    if args.command == "classify-interactions-v0":
+        return cmd_classify_interactions_v0(args)
+    if args.command == "build-semantic-actions-v0":
+        return cmd_build_semantic_actions_v0(args)
+    if args.command == "build-cowgirl-candidate-db-v5":
+        return cmd_build_cowgirl_candidate_db_v5(args)
+    if args.command == "extract-cowgirl-motion-primitives-v1":
+        return cmd_extract_cowgirl_motion_primitives_v1(args)
+    if args.command == "draft-motion-plan-v1":
+        return cmd_draft_motion_plan_v1(args)
+    if args.command == "select-interaction-baseline-for-plan-v0":
+        return cmd_select_interaction_baseline_for_plan_v0(args)
+    if args.command == "synthesize-partner-relative-flow-v0":
+        return cmd_synthesize_partner_relative_flow_v0(args)
+    if args.command == "validate-partner-relative-flow-v0":
+        return cmd_validate_partner_relative_flow_v0(args)
+    if args.command == "run-semantic-rescan-v1":
+        return cmd_run_semantic_rescan_v1(args)
     if args.command == "discover-controller-map":
         return cmd_discover_controller_map(args)
     if args.command == "extract-cowgirl-features-v1":

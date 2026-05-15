@@ -19,6 +19,11 @@ class PrimitiveQuery:
     duration_range: dict[str, float] = field(default_factory=lambda: {"min_seconds": 4.0, "max_seconds": 8.0})
     generation_safe_required: bool = True
     anchor_complete_required: bool = True
+    requested_pose_family: str = "unknown"
+    requested_pose_subtype: str = "unknown"
+    partner_relation: str = "unknown"
+    coordinate_frame: str = "body_relative"
+    contact_targets: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -34,6 +39,9 @@ class SemanticMotionPlanPhase:
     body_parameters: dict[str, Any] = field(default_factory=dict)
     contact_parameters: dict[str, Any] = field(default_factory=dict)
     safety_requirements: dict[str, Any] = field(default_factory=dict)
+    interaction: dict[str, Any] = field(default_factory=dict)
+    anchors: dict[str, Any] = field(default_factory=dict)
+    constraints: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -48,6 +56,10 @@ class SemanticMotionPlan:
     family: str
     requested_subtypes: list[str]
     sequence: list[SemanticMotionPlanPhase]
+    actor_role: str = "unknown"
+    partner_role: str = "unknown"
+    requested_pose_family: str = "unknown"
+    requested_pose_subtype: str = "unknown"
     warnings: list[str] = field(default_factory=list)
     is_final_text_to_animation: bool = False
 
@@ -57,6 +69,10 @@ class SemanticMotionPlan:
             "source_prompt": self.source_prompt,
             "family": self.family,
             "requested_subtypes": self.requested_subtypes,
+            "actor_role": self.actor_role,
+            "partner_role": self.partner_role,
+            "requested_pose_family": self.requested_pose_family,
+            "requested_pose_subtype": self.requested_pose_subtype,
             "sequence": [phase.to_dict() for phase in self.sequence],
             "warnings": self.warnings,
             "is_final_text_to_animation": self.is_final_text_to_animation,

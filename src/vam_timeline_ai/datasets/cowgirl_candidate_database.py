@@ -161,6 +161,56 @@ def build_cowgirl_candidate_db_v3(
     return rows
 
 
+def build_cowgirl_candidate_db_v5(
+    semantic_candidate_db: str | Path,
+    out_jsonl: str | Path,
+    out_csv: str | Path,
+    report: str | Path,
+) -> list[dict[str, Any]]:
+    """Build Cowgirl clean_v3 DB from the Semantic Action candidate inventory."""
+    rows: list[dict[str, Any]] = []
+    for row in load_jsonl(semantic_candidate_db):
+        family = str(row.get("semantic_family") or "unknown")
+        pose_family = str(row.get("pose_family") or "unknown")
+        contact = str(row.get("contact_support") or "unknown")
+        category = _cowgirl_v5_category(row)
+        if family != "cowgirl" and category not in {"not_cowgirl_bj_oral", "not_cowgirl_receiver_response", "unknown_or_unusable"}:
+            continue
+        rows.append({
+            "candidate_id": f"cowgirl_v5::{row.get('window_id')}",
+            "window_id": row.get("window_id"),
+            "pair_window_id": row.get("pair_window_id"),
+            "source_scene_file": row.get("source_scene_file"),
+            "technical_actor_id": row.get("technical_actor_id"),
+            "category": category,
+            "semantic_family": family,
+            "pose_family": pose_family,
+            "pose_subtype": row.get("pose_subtype"),
+            "motion_subtype": row.get("motion_subtype"),
+            "partner_relation": row.get("partner_relation") or ["unknown"],
+            "contact_support": contact,
+            "interaction_family": "cowgirl" if family == "cowgirl" else family,
+            "hand_contact_target": "partner.chest" if contact == "hands_on_partner_chest" else "floor_or_bed" if contact == "hands_on_floor_or_bed" else "none",
+            "partner_relative_alignment_score": row.get("interaction_score"),
+            "hands_on_partner_chest_score": row.get("interaction_score") if contact == "hands_on_partner_chest" else 0.0,
+            "generation_requires_partner_targets": contact == "hands_on_partner_chest",
+            "generation_safe": bool(row.get("generation_safe")) and category in {"cowgirl_clean_motion_generation_safe", "cowgirl_hands_on_partner_chest", "cowgirl_hands_free", "cowgirl_hands_on_floor_or_bed"},
+            "invalidity_reason": row.get("invalidity_reason") or "",
+            "semantic_score": row.get("semantic_score"),
+            "pose_score": row.get("pose_score"),
+            "motion_score": row.get("motion_score"),
+            "interaction_score": row.get("interaction_score"),
+            "warnings": row.get("warnings") or [],
+            "is_human_ground_truth": False,
+            "is_training_label": False,
+        })
+    rows.sort(key=lambda r: (not bool(r.get("generation_safe")), r.get("category"), -float(r.get("semantic_score") or 0.0)))
+    write_jsonl(out_jsonl, rows)
+    _write_v5_csv(rows, out_csv)
+    _write_report_v5(rows, report)
+    return rows
+
+
 def _candidate_record(
     score: dict[str, Any],
     window: dict[str, Any],
@@ -362,6 +412,32 @@ def _db_category(score: dict[str, Any]) -> str:
     return "unknown_or_unusable"
 
 
+def _cowgirl_v5_category(row: dict[str, Any]) -> str:
+    family = str(row.get("semantic_family") or "unknown")
+    contact = str(row.get("contact_support") or "unknown")
+    phase = str(row.get("phase") or "unknown")
+    invalidity = str(row.get("invalidity_reason") or "")
+    if family == "bj_oral":
+        return "not_cowgirl_bj_oral"
+    if family == "receiver_response":
+        return "not_cowgirl_receiver_response"
+    if family != "cowgirl":
+        return "unknown_or_unusable"
+    if invalidity:
+        return "cowgirl_pose_motion_conflict" if "wrong_pose" in invalidity or "conflict" in invalidity else "cowgirl_generation_unsafe"
+    if phase in {"intro", "hold"}:
+        return "cowgirl_context_intro_hold"
+    if contact == "hands_on_partner_chest":
+        return "cowgirl_hands_on_partner_chest"
+    if contact == "hands_on_floor_or_bed":
+        return "cowgirl_hands_on_floor_or_bed"
+    if contact == "hands_free":
+        return "cowgirl_hands_free"
+    if contact == "unknown":
+        return "cowgirl_missing_partner_context"
+    return "cowgirl_clean_motion_generation_safe"
+
+
 def _db_category_v2(score: dict[str, Any]) -> str:
     if score.get("export_unavailable_for_generation"):
         return "export_unavailable_or_unsafe"
@@ -518,6 +594,67 @@ def _write_csv(rows: list[dict[str, Any]], out_csv: str | Path) -> None:
             slim = {key: row.get(key) for key in fieldnames}
             slim["invalidity_reasons"] = ";".join(row.get("invalidity_reasons", []))
             writer.writerow(slim)
+
+
+def _write_v5_csv(rows: list[dict[str, Any]], out_csv: str | Path) -> None:
+    target = Path(out_csv)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "candidate_id",
+        "window_id",
+        "pair_window_id",
+        "category",
+        "semantic_family",
+        "pose_family",
+        "pose_subtype",
+        "motion_subtype",
+        "partner_relation",
+        "contact_support",
+        "interaction_family",
+        "hand_contact_target",
+        "partner_relative_alignment_score",
+        "hands_on_partner_chest_score",
+        "generation_requires_partner_targets",
+        "generation_safe",
+        "invalidity_reason",
+        "semantic_score",
+        "pose_score",
+        "motion_score",
+        "interaction_score",
+    ]
+    with target.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            slim = {key: row.get(key) for key in fieldnames}
+            slim["partner_relation"] = ";".join(row.get("partner_relation") or [])
+            writer.writerow(slim)
+
+
+def _write_report_v5(rows: list[dict[str, Any]], report: str | Path) -> None:
+    target = Path(report)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    categories = Counter(r.get("category") for r in rows)
+    contacts = Counter(r.get("contact_support") for r in rows)
+    subtypes = Counter(r.get("motion_subtype") for r in rows)
+    lines = [
+        "# Cowgirl Candidate DB V5 Report",
+        "",
+        "DB v5 derives from clean_v3 Semantic Actions. It includes pose, motion, partner relation, and contact/support fields.",
+        "It is not ML training data and contains no manual ground truth labels.",
+        "",
+        f"- Records: {len(rows)}",
+        f"- Generation-safe: {sum(1 for r in rows if r.get('generation_safe'))}",
+        "",
+        "## Categories",
+        "",
+    ]
+    lines.extend(f"- `{k}`: {v}" for k, v in categories.most_common()) if categories else lines.append("- None")
+    lines.extend(["", "## Contact/Support", ""])
+    lines.extend(f"- `{k}`: {v}" for k, v in contacts.most_common()) if contacts else lines.append("- None")
+    lines.extend(["", "## Motion Subtypes", ""])
+    lines.extend(f"- `{k}`: {v}" for k, v in subtypes.most_common()) if subtypes else lines.append("- None")
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _write_report(rows: list[dict[str, Any]], report: str | Path) -> None:

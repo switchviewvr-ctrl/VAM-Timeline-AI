@@ -15,6 +15,13 @@ ALLOWED_COWGIRL_CATEGORIES = {
     "semantic_cowgirl_core_soft_fail_generation_safe",
 }
 
+ALLOWED_COWGIRL_V5_CATEGORIES = {
+    "cowgirl_clean_motion_generation_safe",
+    "cowgirl_hands_on_partner_chest",
+    "cowgirl_hands_free",
+    "cowgirl_hands_on_floor_or_bed",
+}
+
 
 def extract_cowgirl_motion_primitives_v0(
     candidate_db: str | Path,
@@ -39,6 +46,31 @@ def extract_cowgirl_motion_primitives_v0(
     return rows
 
 
+def extract_cowgirl_motion_primitives_v1(
+    candidate_db: str | Path,
+    relative_features: str | Path,
+    trajectory_features: str | Path,
+    pose_semantics: str | Path,
+    interaction_semantics: str | Path,
+    out_jsonl: str | Path,
+    out_report: str | Path,
+) -> list[dict[str, Any]]:
+    rel = {r.get("window_id"): r for r in load_jsonl(relative_features) if r.get("window_id")}
+    traj = {r.get("window_id"): r for r in load_jsonl(trajectory_features) if r.get("window_id")}
+    pose = {r.get("window_id"): r for r in load_jsonl(pose_semantics) if r.get("window_id")}
+    interactions = {r.get("window_id"): r for r in load_jsonl(interaction_semantics) if r.get("window_id")}
+    rows: list[dict[str, Any]] = []
+    for candidate in load_jsonl(candidate_db):
+        if not _candidate_allowed_v1(candidate):
+            continue
+        primitive = _primitive_from_candidate_v1(candidate, rel.get(candidate.get("window_id"), {}), traj.get(candidate.get("window_id"), {}), pose.get(candidate.get("window_id"), {}), interactions.get(candidate.get("window_id"), {}))
+        rows.append(primitive.to_dict())
+    rows.sort(key=lambda r: (-float(r.get("generation_parameters", {}).get("source_generation_score") or 0.0), r.get("primitive_id")))
+    write_jsonl(out_jsonl, rows)
+    _write_report_v1(rows, out_report)
+    return rows
+
+
 def _candidate_allowed(candidate: dict[str, Any]) -> bool:
     return bool(
         candidate.get("category") in ALLOWED_COWGIRL_CATEGORIES
@@ -46,6 +78,65 @@ def _candidate_allowed(candidate: dict[str, Any]) -> bool:
         and candidate.get("semantic_family") == "cowgirl"
         and not candidate.get("excluded_from_cowgirl")
     )
+
+
+def _candidate_allowed_v1(candidate: dict[str, Any]) -> bool:
+    return bool(
+        candidate.get("category") in ALLOWED_COWGIRL_V5_CATEGORIES
+        and candidate.get("generation_safe") is True
+        and candidate.get("semantic_family") == "cowgirl"
+    )
+
+
+def _primitive_from_candidate_v1(candidate: dict[str, Any], relative: dict[str, Any], trajectory: dict[str, Any], pose: dict[str, Any], interaction: dict[str, Any]) -> MotionPrimitive:
+    wid = str(candidate.get("window_id"))
+    primitive = _primitive_from_candidate(candidate, relative, trajectory, {"window_id": wid, "controllers": relative.get("controllers_used") or []})
+    primitive.primitive_id = f"cowgirl_primitive_v1::{wid}"
+    primitive.learned_from_dataset = "cowgirl_candidate_db_v5"
+    primitive.semantic_family = "cowgirl"
+    primitive.subtype = normalize_subtype(candidate.get("motion_subtype") or candidate.get("cowgirl_subtype"), (primitive.trajectory_shape or {}).get("classification"))
+    primitive.required_pose_family = "cowgirl"
+    primitive.required_pose_subtype = str(candidate.get("pose_subtype") or pose.get("pose_subtype") or "cowgirl_kneeling")
+    primitive.compatible_pose_subtypes = [
+        "cowgirl_kneeling",
+        "cowgirl_squat",
+        "cowgirl_lean_forward_supported",
+    ]
+    relation = candidate.get("partner_relation") or interaction.get("partner_relation") or ["partner_context_optional"]
+    primitive.required_partner_relation = ["rider_over_receiver"] if "rider_above_partner" in relation else ["partner_context_optional"]
+    primitive.compatible_partner_relations = ["rider_above_partner", "pelvis_aligned", "receiver_lying_on_back", "partner_context_optional"]
+    contact = str(candidate.get("contact_support") or interaction.get("support_context") or "unknown")
+    primitive.contact_support_requirements = {
+        "support_mode": contact,
+        "hands_on_partner_chest_requires_partner_chest_target": contact == "hands_on_partner_chest",
+        "allowed_support_modes": ["hands_free", "hands_on_partner_chest", "hands_on_floor_or_bed", "unknown"],
+    }
+    primitive.anchor_profile = {
+        "profile": "knees_feet_required_hands_optional",
+        "required_anchors": ["lKneeControl", "rKneeControl", "lFootControl", "rFootControl"],
+        "optional_support": ["lHandControl", "rHandControl"],
+    }
+    primitive.pose_context_requirements = {
+        "pose_family": "cowgirl",
+        "compatible_pose_subtypes": primitive.compatible_pose_subtypes,
+        "contact_support": contact,
+    }
+    primitive.interaction_frame = "partner_chest_target" if contact == "hands_on_partner_chest" else "partner_pelvis_local"
+    primitive.safety_requirements.update({
+        "pose_semantics_required": True,
+        "partner_relation_checked": bool(interaction),
+        "contact_support_checked": contact != "unknown",
+    })
+    primitive.generation_parameters.update({
+        "source_generation_score": candidate.get("semantic_score") or candidate.get("generation_candidate_score"),
+        "contact_support": contact,
+        "pose_subtype": primitive.required_pose_subtype,
+    })
+    primitive.warnings = _dedupe(primitive.warnings + [
+        "Primitive v1 includes pose and partner/contact requirements.",
+        "Use only in partner-relative or body-relative generation; do not stitch source clips.",
+    ])
+    return primitive
 
 
 def _primitive_from_candidate(candidate: dict[str, Any], relative: dict[str, Any], trajectory: dict[str, Any], index: dict[str, Any]) -> MotionPrimitive:
@@ -166,8 +257,42 @@ def _write_report(rows: list[dict[str, Any]], out_report: str | Path) -> None:
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _write_report_v1(rows: list[dict[str, Any]], out_report: str | Path) -> None:
+    target = Path(out_report)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    subtypes = Counter(r.get("subtype") for r in rows)
+    frames = Counter(r.get("interaction_frame") for r in rows)
+    contacts = Counter((r.get("contact_support_requirements") or {}).get("support_mode") for r in rows)
+    lines = [
+        "# Cowgirl Motion Primitives V1 Report",
+        "",
+        "These primitives add pose, partner-relation, contact/support, and anchor requirements. They are not Timeline clips.",
+        "",
+        f"- Primitive count: {len(rows)}",
+        "- Source categories: generation-safe Cowgirl categories from DB v5 only",
+        "- BJ/oral, receiver-response, pose/motion conflicts, and unknown/unusable rows are excluded.",
+        "",
+        "## Subtypes",
+        "",
+    ]
+    lines.extend(f"- `{k}`: {v}" for k, v in subtypes.most_common()) if subtypes else lines.append("- None")
+    lines.extend(["", "## Interaction Frames", ""])
+    lines.extend(f"- `{k}`: {v}" for k, v in frames.most_common()) if frames else lines.append("- None")
+    lines.extend(["", "## Contact/Support", ""])
+    lines.extend(f"- `{k}`: {v}" for k, v in contacts.most_common()) if contacts else lines.append("- None")
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def _num(value: Any) -> float:
     try:
         return round(float(value or 0.0), 6)
     except Exception:
         return 0.0
+
+
+def _dedupe(items: list[str]) -> list[str]:
+    out: list[str] = []
+    for item in items:
+        if item and item not in out:
+            out.append(str(item))
+    return out
