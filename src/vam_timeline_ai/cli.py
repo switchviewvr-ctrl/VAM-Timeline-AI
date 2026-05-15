@@ -341,6 +341,70 @@ def build_parser() -> argparse.ArgumentParser:
     run_machine.add_argument("--min-silver-confidence", type=float, default=0.75)
     run_machine.add_argument("--train-silver-baseline", default="true")
 
+    machine_audit = subparsers.add_parser("audit-machine-labels-v1", help="Audit raw machine proposals and silver v1 duplication/conflicts.")
+    machine_audit.add_argument("--run-dir", required=True)
+    machine_audit.add_argument("--proposals", required=True)
+    machine_audit.add_argument("--silver-labels", required=True)
+    machine_audit.add_argument("--windows", required=True)
+    machine_audit.add_argument("--pair-windows", required=True)
+    machine_audit.add_argument("--out", required=True)
+    machine_audit.add_argument("--out-json", required=True)
+
+    aggregate = subparsers.add_parser("aggregate-machine-labels-v2", help="Aggregate raw machine proposals into deduplicated score rows.")
+    aggregate.add_argument("--proposals", required=True)
+    aggregate.add_argument("--out-window-jsonl", required=True)
+    aggregate.add_argument("--out-pair-jsonl", required=True)
+    aggregate.add_argument("--report", required=True)
+
+    silver2 = subparsers.add_parser("build-silver-labels-v2", help="Build silver labels v2 from aggregated machine scores.")
+    silver2.add_argument("--window-scores", required=True)
+    silver2.add_argument("--pair-scores", required=True)
+    silver2.add_argument("--out-window-jsonl", required=True)
+    silver2.add_argument("--out-pair-jsonl", required=True)
+    silver2.add_argument("--out-yaml", required=True)
+    silver2.add_argument("--report", required=True)
+    silver2.add_argument("--min-score", type=float, default=0.78)
+
+    dsv4 = subparsers.add_parser("build-ml-dataset-v4", help="Build ML dataset v4 from silver v2 labels.")
+    dsv4.add_argument("--features", required=True)
+    dsv4.add_argument("--windows", required=True)
+    dsv4.add_argument("--weak-labels", required=True)
+    dsv4.add_argument("--manual-labels", required=True)
+    dsv4.add_argument("--silver-window-labels", required=True)
+    dsv4.add_argument("--silver-pair-labels", required=True)
+    dsv4.add_argument("--out", required=True)
+    dsv4.add_argument("--report", required=True)
+
+    silver_ready2 = subparsers.add_parser("analyze-silver-readiness-v2", help="Analyze silver v2 readiness and balance.")
+    silver_ready2.add_argument("--dataset", required=True)
+    silver_ready2.add_argument("--silver-window-labels", required=True)
+    silver_ready2.add_argument("--silver-pair-labels", required=True)
+    silver_ready2.add_argument("--out", required=True)
+
+    silver_baseline1 = subparsers.add_parser("train-silver-baseline-v1", help="Train balanced silver v2 proxy baseline with sklearn or NumPy fallback.")
+    silver_baseline1.add_argument("--dataset", required=True)
+    silver_baseline1.add_argument("--readiness", required=True)
+    silver_baseline1.add_argument("--out-dir", required=True)
+    silver_baseline1.add_argument("--report", required=True)
+    silver_baseline1.add_argument("--allow-numpy-fallback", default="true")
+
+    machine_batch2 = subparsers.add_parser("build-machine-proposal-review-batch-v2", help="Build review batch from aggregated machine/silver v2 scores.")
+    machine_batch2.add_argument("--run-dir", required=True)
+    machine_batch2.add_argument("--window-scores", required=True)
+    machine_batch2.add_argument("--pair-scores", required=True)
+    machine_batch2.add_argument("--silver-window-labels", required=True)
+    machine_batch2.add_argument("--silver-pair-labels", required=True)
+    machine_batch2.add_argument("--out-dir", required=True)
+    machine_batch2.add_argument("--batch-size", type=int, default=120)
+    machine_batch2.add_argument("--max-per-scene", type=int, default=15)
+    machine_batch2.add_argument("--max-per-sample", type=int, default=3)
+
+    run_machine2 = subparsers.add_parser("run-machine-labeling-v2", help="Run audit, aggregation, silver v2, dataset v4, baseline, and review batch.")
+    run_machine2.add_argument("--run-dir", required=True)
+    run_machine2.add_argument("--min-silver-score", type=float, default=0.78)
+    run_machine2.add_argument("--train-silver-baseline", default="true")
+    run_machine2.add_argument("--allow-numpy-fallback", default="true")
+
     return parser
 
 
@@ -910,6 +974,94 @@ def cmd_run_machine_labeling_v1(args: argparse.Namespace) -> int:
     return 0 if summary["status"] == "ok" else 1
 
 
+def cmd_audit_machine_labels_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.machine_label_audit import audit_machine_labels_v1
+
+    summary = audit_machine_labels_v1(args.run_dir, args.proposals, args.silver_labels, args.windows, args.pair_windows, args.out, args.out_json)
+    print(f"Machine label audit written: {args.out}")
+    print(f"Proposals: {summary['total_proposals']}; conflicts={summary['conflict_counts']}")
+    return 0
+
+
+def cmd_aggregate_machine_labels_v2(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.machine_label_aggregation import aggregate_machine_labels_v2
+
+    summary = aggregate_machine_labels_v2(args.proposals, args.out_window_jsonl, args.out_pair_jsonl, args.report)
+    print(f"Aggregated machine labels written: {args.out_window_jsonl}, {args.out_pair_jsonl}")
+    print(f"Window scores: {summary['window_score_rows']}; pair scores: {summary['pair_score_rows']}")
+    return 0
+
+
+def cmd_build_silver_labels_v2(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.silver_labels_v2 import build_silver_labels_v2
+
+    summary = build_silver_labels_v2(args.window_scores, args.pair_scores, args.out_window_jsonl, args.out_pair_jsonl, args.out_yaml, args.report, min_score=args.min_score)
+    print(f"Silver v2 labels written: {args.out_window_jsonl}, {args.out_pair_jsonl}")
+    print(f"Window records: {summary['v2_silver_window_records']}; pair records: {summary['v2_silver_pair_records']}")
+    return 0
+
+
+def cmd_build_ml_dataset_v4(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.ml.dataset_v4 import build_ml_dataset_v4
+
+    summary = build_ml_dataset_v4(args.features, args.windows, args.weak_labels, args.manual_labels, args.silver_window_labels, args.silver_pair_labels, args.out, args.report)
+    print(f"ML dataset v4 written: {args.out}")
+    print(f"Shape: {summary['shape']}; default trainable silver labels={summary['default_trainable_silver_labels']}")
+    return 0
+
+
+def cmd_analyze_silver_readiness_v2(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.ml.silver_readiness_v2 import analyze_silver_readiness_v2
+
+    summary = analyze_silver_readiness_v2(args.dataset, args.silver_window_labels, args.silver_pair_labels, args.out)
+    print(f"Silver readiness v2 report written: {args.out}")
+    print(f"Ready: {summary['silver_proxy_training_ready']}; labels={summary['labels_trainable_by_default']}")
+    return 0
+
+
+def cmd_train_silver_baseline_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.ml.silver_baseline_v1 import train_silver_baseline_v1
+
+    summary = train_silver_baseline_v1(args.dataset, args.readiness, args.out_dir, args.report, allow_numpy_fallback=_arg_bool(args.allow_numpy_fallback))
+    print(f"Silver baseline v1 report written: {args.report}")
+    print(f"Trained: {summary['trained']}; sklearn={summary['sklearn_used']}; numpy={summary['numpy_fallback_used']}")
+    return 0
+
+
+def cmd_build_machine_proposal_review_batch_v2(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.machine_proposal_review_batch_v2 import build_machine_proposal_review_batch_v2
+
+    rows = build_machine_proposal_review_batch_v2(
+        args.run_dir,
+        args.window_scores,
+        args.pair_scores,
+        args.silver_window_labels,
+        args.silver_pair_labels,
+        args.out_dir,
+        batch_size=args.batch_size,
+        max_per_scene=args.max_per_scene,
+        max_per_sample=args.max_per_sample,
+    )
+    print(f"Machine proposal review batch v2 written: {args.out_dir}")
+    print(f"Review items: {len(rows)}")
+    return 0
+
+
+def cmd_run_machine_labeling_v2(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.machine_labeling_v2 import run_machine_labeling_v2
+
+    summary = run_machine_labeling_v2(
+        args.run_dir,
+        min_silver_score=args.min_silver_score,
+        train_silver_baseline=_arg_bool(args.train_silver_baseline),
+        allow_numpy_fallback=_arg_bool(args.allow_numpy_fallback),
+    )
+    print(f"Machine labeling v2 status: {summary['status']}")
+    print(f"Silver v2 window records: {summary.get('silver_v2_window_records')}; pair records: {summary.get('silver_v2_pair_records')}")
+    print(f"Baseline trained: {summary.get('baseline_trained')}; manual labels modified: {summary.get('manual_labels_modified', False)}")
+    return 0 if summary["status"] == "ok" else 1
+
+
 def _arg_bool(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
@@ -1044,6 +1196,22 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_build_machine_proposal_review_batch(args)
     if args.command == "run-machine-labeling-v1":
         return cmd_run_machine_labeling_v1(args)
+    if args.command == "audit-machine-labels-v1":
+        return cmd_audit_machine_labels_v1(args)
+    if args.command == "aggregate-machine-labels-v2":
+        return cmd_aggregate_machine_labels_v2(args)
+    if args.command == "build-silver-labels-v2":
+        return cmd_build_silver_labels_v2(args)
+    if args.command == "build-ml-dataset-v4":
+        return cmd_build_ml_dataset_v4(args)
+    if args.command == "analyze-silver-readiness-v2":
+        return cmd_analyze_silver_readiness_v2(args)
+    if args.command == "train-silver-baseline-v1":
+        return cmd_train_silver_baseline_v1(args)
+    if args.command == "build-machine-proposal-review-batch-v2":
+        return cmd_build_machine_proposal_review_batch_v2(args)
+    if args.command == "run-machine-labeling-v2":
+        return cmd_run_machine_labeling_v2(args)
     parser.error(f"Unknown command: {args.command}")
     return 2
 

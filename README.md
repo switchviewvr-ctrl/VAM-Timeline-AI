@@ -149,6 +149,31 @@ python -m vam_timeline_ai.cli run-machine-labeling-v1 ^
 
 This writes machine outputs under `data\runs\clean_v2\labels\machine_proposals\` and a review batch under `data\runs\clean_v2\labels\batches\batch_machine_review_001\`. Generated data remains local and ignored by git.
 
+### Silver v2 Quality Control
+
+Raw machine proposals can be intentionally overcomplete. Pair/context rules can also multiply labels because one movement window may appear in many pair windows. This is useful for review, but it is too duplicated and imbalanced for training directly.
+
+Silver v2 fixes that by:
+
+- auditing raw proposal duplication and conflicts
+- aggregating many raw proposals into one window-label or pair-window-label score
+- capping repeated pair-context evidence
+- keeping role/contact candidates high-risk
+- excluding `contact_unknown` and role labels such as `rider_active` from default training targets
+- building a balanced proxy dataset from aggregated silver v2 labels, not raw proposals
+
+Run the v2 workflow:
+
+```powershell
+python -m vam_timeline_ai.cli run-machine-labeling-v2 ^
+  --run-dir data\runs\clean_v2 ^
+  --min-silver-score 0.78 ^
+  --train-silver-baseline true ^
+  --allow-numpy-fallback true
+```
+
+The optional silver baseline is only a feature sanity check. If it trains, its metrics measure rule/proxy reproducibility, not human semantic accuracy. Human labels remain required before real supervised semantic ML.
+
 ## Commands
 
 Print project and reference status:
