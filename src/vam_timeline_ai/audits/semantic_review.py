@@ -56,10 +56,12 @@ def export_semantic_review_010(
     use_cowgirl_candidate_score_v2: bool = False,
     use_cowgirl_candidate_score_v3: bool = False,
     use_cowgirl_candidate_score_v4: bool = False,
+    use_cowgirl_candidate_score_v5: bool = False,
     use_rider_receiver_discrimination: bool = False,
     use_relative_motion_features: bool = False,
     use_trajectory_shape_features: bool = False,
     use_relative_reference_matches: bool = False,
+    use_pose_export_validity: bool = False,
 ) -> dict[str, Any]:
     if count != 10:
         raise ValueError("semantic review MVP expects exactly 10 items")
@@ -76,12 +78,16 @@ def export_semantic_review_010(
         "use_cowgirl_candidate_score_v2": use_cowgirl_candidate_score_v2,
         "use_cowgirl_candidate_score_v3": use_cowgirl_candidate_score_v3,
         "use_cowgirl_candidate_score_v4": use_cowgirl_candidate_score_v4,
+        "use_cowgirl_candidate_score_v5": use_cowgirl_candidate_score_v5,
         "use_rider_receiver_discrimination": use_rider_receiver_discrimination,
         "use_relative_motion_features": use_relative_motion_features,
         "use_trajectory_shape_features": use_trajectory_shape_features,
         "use_relative_reference_matches": use_relative_reference_matches,
+        "use_pose_export_validity": use_pose_export_validity,
     }
-    if use_cowgirl_candidate_score_v4 or use_relative_motion_features or use_trajectory_shape_features or use_relative_reference_matches:
+    if use_cowgirl_candidate_score_v5 or use_pose_export_validity:
+        selected = _select_10_v7(data)
+    elif use_cowgirl_candidate_score_v4 or use_relative_motion_features or use_trajectory_shape_features or use_relative_reference_matches:
         selected = _select_10_v6(data)
     elif use_cowgirl_candidate_score_v3 or use_rider_receiver_discrimination:
         selected = _select_10_v5(data)
@@ -191,6 +197,8 @@ def _load_data(run: Path) -> dict[str, Any]:
         "trajectory_features": {r.get("window_id"): r for r in load_jsonl(run / "relative_motion" / "trajectory_shape_features.jsonl") if r.get("window_id")},
         "relative_reference_matches": {r.get("window_id"): r for r in load_jsonl(run / "relative_motion" / "relative_reference_matches.jsonl") if r.get("window_id")},
         "cowgirl_scores_v4": {r.get("window_id"): r for r in load_jsonl(run / "audits" / "cowgirl_candidate_scores_v4.jsonl") if r.get("window_id")},
+        "pose_export_validity": {r.get("window_id"): r for r in load_jsonl(run / "audits" / "pose_export_validity.jsonl") if r.get("window_id")},
+        "cowgirl_scores_v5": {r.get("window_id"): r for r in load_jsonl(run / "audits" / "cowgirl_candidate_scores_v5.jsonl") if r.get("window_id")},
     }
 
 
@@ -561,6 +569,102 @@ def _select_10_v6(data: dict[str, Any]) -> list[dict[str, Any]]:
     return selected
 
 
+def _select_10_v7(data: dict[str, Any]) -> list[dict[str, Any]]:
+    flags = data.get("selection_flags", {})
+    min_duration = float(flags.get("min_cowgirl_window_seconds") or 4.0)
+    quotas = {
+        "semantic_cowgirl": 3,
+        "generation_safe_cowgirl": 2,
+        "cowgirl_context_intro": 1,
+        "receiver_body_response": 1,
+        "likely_head_bj_false_positive": 1,
+        "transition_realign": 1,
+        "export_or_pose_problem": 1,
+    }
+    pools = {key: [] for key in quotas}
+    for wid, score in data["cowgirl_scores_v5"].items():
+        duration = float(score.get("duration_seconds") or 0.0)
+        if score.get("semantic_cowgirl_candidate_v5") and duration >= min_duration and not score.get("likely_receiver_response") and not score.get("likely_head_or_bj_false_positive"):
+            pools["semantic_cowgirl"].append(
+                _candidate(
+                    "semantic_cowgirl",
+                    wid,
+                    _pair_id_from_role_score(data["rider_receiver_scores"].get(wid, {})),
+                    float(score.get("final_semantic_cowgirl_score_v5") or 0.0),
+                    ["high semantic Cowgirl score v5", "export validity is reported separately"],
+                    ["semantic_cowgirl_candidate_v5"],
+                )
+            )
+        if score.get("generation_candidate_v5") and duration >= min_duration and not score.get("semantically_good_but_not_generation_safe"):
+            pools["generation_safe_cowgirl"].append(
+                _candidate(
+                    "generation_safe_cowgirl",
+                    wid,
+                    _pair_id_from_role_score(data["rider_receiver_scores"].get(wid, {})),
+                    float(score.get("final_generation_candidate_score_v5") or 0.0),
+                    ["higher generation candidate score v5", "no known broken-pose/export block"],
+                    ["generation_candidate_v5"],
+                )
+            )
+        if score.get("cowgirl_context_low_motion_intro") or score.get("too_short_penalty", 0) or score.get("intro_low_motion_penalty", 0):
+            pools["cowgirl_context_intro"].append(
+                _candidate(
+                    "cowgirl_context_intro",
+                    wid,
+                    None,
+                    max(float(score.get("final_semantic_cowgirl_score_v5") or 0.0), float(score.get("intro_low_motion_penalty") or 0.0)),
+                    ["Cowgirl pose/context but low-motion intro or too short"],
+                    ["cowgirl_context_low_motion_intro"],
+                )
+            )
+        if score.get("likely_transition_or_adjustment"):
+            pools["transition_realign"].append(
+                _candidate("transition_realign", wid, None, float(score.get("transition_penalty") or 0.0), ["transition/realign candidate"], ["transition_or_adjustment"])
+            )
+        if score.get("likely_head_or_bj_false_positive"):
+            pools["likely_head_bj_false_positive"].append(
+                _candidate("likely_head_bj_false_positive", wid, None, float(score.get("head_bj_penalty") or 0.0), ["head/BJ or isolated false-positive guard"], ["head_or_bj_false_positive"])
+            )
+        if score.get("semantically_good_but_not_generation_safe") or score.get("export_pose_validity") in {"broken_pose", "export_unavailable"}:
+            pools["export_or_pose_problem"].append(
+                _candidate(
+                    "export_or_pose_problem",
+                    wid,
+                    None,
+                    max(float(score.get("final_semantic_cowgirl_score_v5") or 0.0), float(score.get("broken_pose_penalty_for_export_only") or 0.0)),
+                    ["semantic/export split case: inspect pose validity separately"],
+                    [score.get("export_pose_validity") or "export_pose_validity_unknown"],
+                )
+            )
+    for wid, score in data["rider_receiver_scores"].items():
+        receiver_score = float(score.get("receiver_body_response_score") or 0.0)
+        if score.get("rider_receiver_status") == "likely_receiver_body_response" or receiver_score >= 0.55:
+            pools["receiver_body_response"].append(
+                _candidate(
+                    "receiver_body_response",
+                    wid,
+                    _pair_id_from_role_score(score),
+                    receiver_score,
+                    ["receiver/body-response negative retained for audit"],
+                    ["receiver_body_response", "not_active_rider"],
+                )
+            )
+    for rows in pools.values():
+        _enrich_candidates(rows, data)
+        rows.sort(key=lambda r: float(r.get("score") or 0.0), reverse=True)
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    per_scene: Counter[str] = Counter()
+    per_sample: Counter[str] = Counter()
+    for category, quota in quotas.items():
+        _take(pools[category], quota, selected, seen, per_scene, per_sample, strict=True)
+    if len(selected) < 10:
+        _take([c for rows in pools.values() for c in rows], 10 - len(selected), selected, seen, per_scene, per_sample, strict=False)
+    if len(selected) != 10:
+        raise ValueError(f"Could not select exactly 10 examples; selected {len(selected)}")
+    return selected
+
+
 def _positive_candidates(data: dict[str, Any]) -> list[dict[str, Any]]:
     out = []
     wanted = {"cowgirl_vertical_bounce", "cowgirl_forward_back_rock", "cowgirl_circular_grind"}
@@ -708,10 +812,12 @@ def _make_review_row(idx: int, item: dict[str, Any], data: dict[str, Any]) -> di
     trajectory_feature = data["trajectory_features"].get(wid, {})
     relative_match = data["relative_reference_matches"].get(wid, {})
     cowgirl_score_v4 = data["cowgirl_scores_v4"].get(wid, {})
+    pose_export = data["pose_export_validity"].get(wid, {})
+    cowgirl_score_v5 = data["cowgirl_scores_v5"].get(wid, {})
     phase = classify_motion_phase(frow, body_quality)
     guard = evaluate_domain_guards(frow, body_quality)
     review_id = f"review_{idx:03d}"
-    guess = _semantic_guess(item, frow, window_scores, pair_feature, pair_scores, silver_window, silver_pair, body_quality, phase, guard, reference_match, rider_receiver, cowgirl_score_v3, relative_feature, trajectory_feature, relative_match, cowgirl_score_v4)
+    guess = _semantic_guess(item, frow, window_scores, pair_feature, pair_scores, silver_window, silver_pair, body_quality, phase, guard, reference_match, rider_receiver, cowgirl_score_v3, relative_feature, trajectory_feature, relative_match, cowgirl_score_v4, pose_export, cowgirl_score_v5)
     pair_actor = _pair_actor(wid, pair)
     return {
         "review_id": review_id,
@@ -751,12 +857,14 @@ def _make_review_row(idx: int, item: dict[str, Any], data: dict[str, Any]) -> di
             "trajectory_shape_features": trajectory_feature,
             "relative_reference_match": relative_match,
             "clean_cowgirl_candidate_score_v4": cowgirl_score_v4,
+            "pose_export_validity": pose_export,
+            "clean_cowgirl_candidate_score_v5": cowgirl_score_v5,
         },
         "why_selected": item["why_selected"],
         "user_questions": _questions_for_item(bool(pair)),
         "answer_options": ["correct", "wrong", "unclear"],
         "is_human_ground_truth": False,
-        "export_context_padding_seconds": 0.5 if (data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v2") or data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v3") or data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v4")) else 0.0,
+        "export_context_padding_seconds": 0.5 if (data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v2") or data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v3") or data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v4") or data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v5")) else 0.0,
     }
 
 
@@ -778,6 +886,8 @@ def _semantic_guess(
     trajectory_feature: dict[str, Any] | None = None,
     relative_match: dict[str, Any] | None = None,
     cowgirl_score_v4: dict[str, Any] | None = None,
+    pose_export: dict[str, Any] | None = None,
+    cowgirl_score_v5: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     score_labels = [str(r.get("label")) for r in sorted(scores, key=lambda r: float(r.get("final_score") or 0.0), reverse=True)]
     silver_labels = list(silver_window.get("positive_labels", []) or [])
@@ -810,6 +920,8 @@ def _semantic_guess(
     trajectory_feature = trajectory_feature or {}
     relative_match = relative_match or {}
     cowgirl_score_v4 = cowgirl_score_v4 or {}
+    pose_export = pose_export or {}
+    cowgirl_score_v5 = cowgirl_score_v5 or {}
     multiplier = float(guard.get("cowgirl_confidence_multiplier") or 1.0)
     if body_quality.get("body_motion_quality") in {"controller_only_whole_person_motion", "root_only_motion"}:
         active_candidate = "unsafe/root-motion only; not valid rider output"
@@ -839,6 +951,8 @@ def _semantic_guess(
         movement_labels = _dedupe(["static_or_jitter_trajectory", *movement_labels])[:4]
     if cowgirl_score_v4.get("likely_head_or_bj_false_positive"):
         movement_labels = _dedupe(["possible_non_cowgirl_head_dominant_motion", *movement_labels])[:4]
+    if cowgirl_score_v5.get("cowgirl_context_low_motion_intro"):
+        movement_labels = _dedupe(["cowgirl_intro_or_start_pose", "not_clean_motion", *movement_labels])[:4]
     if role_status == "likely_active_rider":
         active_candidate = "likely yes (motion/pair evidence)"
         passive_candidate = "unlikely"
@@ -881,6 +995,12 @@ def _semantic_guess(
         "closed_loop_ratio": (trajectory_feature.get("feature_values") or {}).get("closed_loop_ratio"),
         "dominant_motion_plane": trajectory_feature.get("dominant_motion_plane"),
         "clean_cowgirl_score_v4": cowgirl_score_v4.get("final_clean_cowgirl_score_v4"),
+        "semantic_cowgirl_score_v5": cowgirl_score_v5.get("final_semantic_cowgirl_score_v5"),
+        "generation_candidate_score_v5": cowgirl_score_v5.get("final_generation_candidate_score_v5"),
+        "export_pose_validity": cowgirl_score_v5.get("export_pose_validity") or pose_export.get("export_pose_validity"),
+        "generation_template_safe": bool(cowgirl_score_v5.get("generation_template_safe") or pose_export.get("generation_template_safe")),
+        "semantically_good_but_not_generation_safe": bool(cowgirl_score_v5.get("semantically_good_but_not_generation_safe")),
+        "low_motion_intro_candidate": bool(cowgirl_score_v5.get("cowgirl_context_low_motion_intro") or pose_export.get("low_motion_intro_candidate")),
         "safe_for_learning": bool((relative_feature.get("feature_values") or {}).get("safe_for_learning") or relative_match.get("safe_for_learning")),
         "teleport_risk": (relative_feature.get("feature_quality") or {}).get("teleport_risk"),
         "safe_for_generation_template": bool(cowgirl_score_v4.get("safe_for_learning")) and False,
@@ -949,9 +1069,14 @@ def _attempt_timeline_export(row: dict[str, Any], data: dict[str, Any], out_dir:
         "coordinate_space_assumption": "Original Timeline controller-space/control-space for the same source scene and atom; not retargeted.",
         "source_world_coords_stripped": safety["source_world_coords_stripped"],
         "exported_as_relative_motion": safety["exported_as_relative_motion"],
+        "uses_absolute_review_coordinates": True,
+        "review_export_safe_to_inspect": safety["safe_for_import"],
         "safe_for_import": safety["safe_for_import"],
         "safe_for_learning": bool(row.get("system_semantic_guess", {}).get("safe_for_learning")),
+        "generation_template_safe": False,
         "safe_for_generation_template": safety["safe_for_generation_template"],
+        "pose_broken_risk": row.get("system_semantic_guess", {}).get("export_pose_validity") in {"broken_pose", "unknown"},
+        "generation_template_block_reasons": _generation_template_block_reasons(row, safety),
         "exported_controller_count": len(names),
         "stripped_world_transform_count": safety["stripped_world_transform_count"],
         "stripped_atom_root_count": safety["stripped_atom_root_count"],
@@ -1021,6 +1146,25 @@ def _filter_safe_export_controllers(positions: np.ndarray, rotations: np.ndarray
         "stripped_controller_names": [name for idx, name in enumerate(names) if idx not in safe_indices],
     }
     return safe_positions, safe_rotations, safe_names, safety
+
+
+def _generation_template_block_reasons(row: dict[str, Any], safety: dict[str, Any]) -> list[str]:
+    reasons = ["absolute_review_coordinates"]
+    guess = row.get("system_semantic_guess", {})
+    validity = guess.get("export_pose_validity")
+    if validity == "broken_pose":
+        reasons.append("broken_pose")
+    if validity == "export_unavailable":
+        reasons.append("export_unavailable")
+    if not safety.get("exported_controller_count"):
+        reasons.append("no_safe_bodypart_controllers")
+    if float(row.get("duration_seconds") or 0.0) < 4.0:
+        reasons.append("too_short")
+    if guess.get("low_motion_intro_candidate"):
+        reasons.append("low_motion")
+    if guess.get("rider_receiver_status") == "likely_receiver_body_response":
+        reasons.append("receiver_body_response")
+    return _dedupe(reasons)
 
 
 def _write_export_unavailable(out_dir: Path, row: dict[str, Any], reason: str) -> dict[str, Any]:
@@ -1348,6 +1492,9 @@ def _write_index_html(rows: list[dict[str, Any]], out: Path) -> None:
             f"<li>Trajectory shape: {html.escape(str(guess.get('trajectory_shape_classification')))} "
             f"(oval={html.escape(str(guess.get('oval_path_score')))}, ellipse={html.escape(str(guess.get('ellipse_fit_score')))}, closed={html.escape(str(guess.get('closed_loop_ratio')))})</li>"
             f"<li>Clean Cowgirl score v4: {html.escape(str(guess.get('clean_cowgirl_score_v4')))}</li>"
+            f"<li>Semantic Cowgirl score v5: {html.escape(str(guess.get('semantic_cowgirl_score_v5')))}</li>"
+            f"<li>Generation candidate score v5: {html.escape(str(guess.get('generation_candidate_score_v5')))}</li>"
+            f"<li>Export pose validity: {html.escape(str(guess.get('export_pose_validity')))}; generation template safe: {html.escape(str(guess.get('generation_template_safe')))}</li>"
             f"<li>Safe for learning: {html.escape(str(guess.get('safe_for_learning')))}; teleport risk: {html.escape(str(guess.get('teleport_risk')))}</li>"
             f"<li>Reference status: {html.escape(str(guess.get('reference_review_status')))}</li>"
             f"<li>Overall confidence: {guess.get('overall_confidence')}</li></ul>"
@@ -1412,12 +1559,24 @@ def _write_semantic_result(out: Path, rows: list[dict[str, Any]], status: str, c
         transition = labels.get("transition_adjustment", 0)
         root_false = labels.get("controller_only_whole_person_motion", 0) + labels.get("root_only_motion_false_positive", 0)
         receiver_response = labels.get("receiver_body_response", 0) + labels.get("passive_receiver_motion", 0)
+        broken_pose = labels.get("pose_broken", 0) + labels.get("export_pose_validity_issue", 0)
+        clean_motion = labels.get("clean_cowgirl_motion", 0)
+        low_intro = labels.get("low_motion_intro", 0) + labels.get("cowgirl_intro_or_start_pose", 0)
+        export_unavailable = labels.get("export_unavailable", 0)
         wrong_or_unclear = counts.get("user_verdict", Counter()).get("wrong", 0) + counts.get("user_verdict", Counter()).get("unclear", 0)
-        correct = counts.get("user_verdict", Counter()).get("correct", 0)
+        correct = counts.get("user_verdict", Counter()).get("correct", 0) + counts.get("user_verdict", Counter()).get("correct_or_unclear", 0)
         if (cowgirl_true <= 1 and len(rows) >= 10) or wrong_or_unclear > correct:
             verdict.update(
                 {
                     "feature_semantics_trusted": "no" if cowgirl_true <= 1 else "uncertain",
+                    "machine_labels_trusted_for_proxy_ml": "no",
+                    "proceed_to_ml": "no",
+                }
+            )
+        elif cowgirl_true >= 3:
+            verdict.update(
+                {
+                    "feature_semantics_trusted": "uncertain_but_improving",
                     "machine_labels_trusted_for_proxy_ml": "no",
                     "proceed_to_ml": "no",
                 }
@@ -1427,12 +1586,16 @@ def _write_semantic_result(out: Path, rows: list[dict[str, Any]], status: str, c
                 "## Human Review Interpretation",
                 "",
                 f"- Clear true Cowgirl positives: {cowgirl_true}/{len(rows)}",
+                f"- Clean Cowgirl motion labels: {clean_motion}",
                 f"- Possible Cowgirl context/ambiguous examples: {possible_cowgirl}",
                 f"- Transition/adjustment/in-between examples: {transition}",
                 f"- Whole-person/controller/root false positives: {root_false}",
                 f"- Receiver/body-response false-positive audit labels: {receiver_response}",
-                "- Semantic trust is low; machine/silver labels are not ready for ML.",
-                "- Required fixes: detect root/controller-only motion, reduce transition false positives, add domain guards, and calibrate against handmade references.",
+                f"- Broken pose/export validity issues: {broken_pose}",
+                f"- Cowgirl context but low-motion/intro examples: {low_intro}",
+                f"- Export unavailable examples: {export_unavailable}",
+                "- Machine/silver labels are still not training truth and ML remains stopped.",
+                "- Current focus: separate semantic correctness from export/pose/generation-template usability.",
                 "",
             ]
         )
@@ -1605,7 +1768,7 @@ def _compact(data: dict[str, Any], limit: int = 4) -> str:
 
 
 def _semantic_verdict(*counters: Counter[str]) -> str:
-    yes = sum(c.get("correct", 0) + c.get("true", 0) + c.get("yes", 0) for c in counters)
+    yes = sum(c.get("correct", 0) + c.get("correct_or_unclear", 0) + c.get("true", 0) + c.get("yes", 0) for c in counters)
     no = sum(c.get("wrong", 0) + c.get("false", 0) + c.get("no", 0) for c in counters)
     unclear = sum(c.get("unclear", 0) + c.get("unknown", 0) for c in counters)
     if no > max(1, yes * 0.25):

@@ -3,13 +3,14 @@ from pathlib import Path
 import numpy as np
 
 from vam_timeline_ai.audits.semantic_review import export_semantic_review_010
+from vam_timeline_ai.audits.pose_export_validity import pose_export_validity_for_review_item
 from vam_timeline_ai.features.relative_features import relative_features_from_arrays
 from vam_timeline_ai.features.trajectory_shape import trajectory_shape_for_points
 from vam_timeline_ai.io.json_utils import load_jsonl, write_jsonl
 from vam_timeline_ai.motion.coordinate_spaces import can_use_for_final_export, is_allowed_body_controller_track, is_disallowed_world_or_root_track
 from vam_timeline_ai.motion.relative_motion import build_relative_motion_window_row
 from vam_timeline_ai.references.relative_matcher import compare_relative_wild_to_handmade
-from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_window_v4
+from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_window_v4, score_window_v5
 
 
 def _times(n=121):
@@ -114,6 +115,53 @@ def test_cowgirl_v4_rewards_oval_and_penalizes_receiver_static_head():
     assert not static["clean_cowgirl_candidate_v4"]
 
 
+def test_pose_export_audit_separates_semantic_correct_from_broken_export():
+    review = {"review_id": "review_001", "window_id": "w", "sample_id": "s", "has_timeline_export": True, "duration_seconds": 4.0}
+    answer = {"user_verdict": "correct", "actual_labels": ["cowgirl_true_segment", "pose_broken", "export_pose_validity_issue"]}
+    relative = {"safe_for_learning": True, "controllers": ["hipControl", "chestControl"], "bodyparts": ["hip", "chest"], "teleport_risk": "low", "moving_controller_count_relative": 2, "stripped_track_count": 0, "coordinate_space_assumptions": {"allowed_body_controller_count": 2}}
+    body = {"body_motion_quality": "good_body_motion", "meaningful_motion_duration_ratio": 1.0, "active_bodypart_count_above_threshold": 2}
+    result = pose_export_validity_for_review_item(review, answer, {}, relative, body)
+    assert result["semantic_motion_likely_valid"] is True
+    assert result["export_pose_validity"] == "broken_pose"
+    assert result["generation_template_safe"] is False
+
+
+def test_export_unavailable_does_not_count_as_semantic_false():
+    review = {"review_id": "review_007", "window_id": "w", "sample_id": "s", "has_timeline_export": False, "duration_seconds": 4.0}
+    answer = {"user_verdict": "unclear", "actual_labels": ["export_unavailable"]}
+    result = pose_export_validity_for_review_item(review, answer, {}, {}, {})
+    assert result["semantic_motion_likely_valid"] == "unknown"
+    assert result["export_pose_validity"] == "export_unavailable"
+
+
+def test_cowgirl_v5_has_semantic_and_generation_scores_with_broken_pose_penalty():
+    feature = {"window_id": "win", "feature_values": {}, "sample_id": "s"}
+    body = {"body_motion_quality": "good_body_motion"}
+    rel = {"feature_values": {"safe_for_learning": 1.0}}
+    traj = {"trajectory_shape_classification": "oval_grind", "feature_values": {"grind_pattern_score": 0.8, "oval_path_score": 0.8, "ellipse_fit_score": 0.7, "closed_loop_ratio": 0.8, "jitter_score": 0.1}}
+    match = {"cowgirl_relative_score": 0.7, "cowgirl_grind_trajectory_score": 0.8, "safe_for_learning": True}
+    window = {"duration_seconds": 4.0}
+    rider = {"rider_receiver_status": "likely_active_rider", "active_rider_score": 0.8, "receiver_body_response_score": 0.1}
+    pose = {"semantic_motion_likely_valid": True, "export_pose_validity": "broken_pose", "generation_template_safe": False, "motion_strength_score": 0.9}
+    scored = score_window_v5(feature, body, match, rel, traj, window, rider, pose)
+    assert scored["final_semantic_cowgirl_score_v5"] >= 0.7
+    assert scored["final_generation_candidate_score_v5"] < scored["final_semantic_cowgirl_score_v5"]
+    assert scored["semantically_good_but_not_generation_safe"] is True
+
+
+def test_low_motion_intro_is_not_clean_generation_motion():
+    feature = {"window_id": "win", "feature_values": {}, "sample_id": "s"}
+    body = {"body_motion_quality": "good_body_motion"}
+    rel = {"feature_values": {"safe_for_learning": 1.0}}
+    traj = {"trajectory_shape_classification": "oval_grind", "feature_values": {"grind_pattern_score": 0.8, "oval_path_score": 0.8, "ellipse_fit_score": 0.7, "closed_loop_ratio": 0.8, "jitter_score": 0.1}}
+    match = {"cowgirl_relative_score": 0.7, "cowgirl_grind_trajectory_score": 0.8, "safe_for_learning": True}
+    rider = {"rider_receiver_status": "likely_active_rider", "active_rider_score": 0.8, "receiver_body_response_score": 0.1}
+    pose = {"semantic_motion_likely_valid": "unknown", "export_pose_validity": "review_only_absolute_pose", "generation_template_safe": False, "low_motion_intro_candidate": True, "motion_strength_score": 0.1}
+    scored = score_window_v5(feature, body, match, rel, traj, {"duration_seconds": 4.0}, rider, pose)
+    assert scored["cowgirl_context_low_motion_intro"] is True
+    assert scored["final_generation_candidate_score_v5"] == 0.0
+
+
 def test_relative_matcher_uses_relative_space(tmp_path):
     wild_rel = tmp_path / "wild_rel.jsonl"
     wild_traj = tmp_path / "wild_traj.jsonl"
@@ -184,3 +232,55 @@ def test_semantic_review_v6_includes_relative_trajectory_evidence(tmp_path):
     assert positives
     assert all(r["system_semantic_guess"]["safe_for_learning"] for r in positives)
     assert all("trajectory_shape_features" in r["evidence"] for r in rows)
+
+
+def test_semantic_review_v7_includes_semantic_and_generation_categories(tmp_path):
+    from tests.test_semantic_review import _make_run
+
+    run = _make_run(tmp_path)
+    rel_rows = []
+    traj_rows = []
+    match_rows = []
+    score_rows = []
+    rider_rows = []
+    pose_rows = []
+    cats = ["semantic", "semantic", "semantic", "generation", "generation", "intro", "receiver", "head", "transition", "problem", "fallback", "fallback"]
+    for idx, cat in enumerate(cats):
+        wid = f"win_{idx:02d}"
+        safe = cat != "problem"
+        rel_rows.append({"window_id": wid, "feature_values": {"safe_for_learning": 1.0 if safe else 0.0}, "feature_quality": {"teleport_risk": "low"}})
+        traj_rows.append({"window_id": wid, "safe_for_learning": safe, "trajectory_shape_classification": "oval_grind", "dominant_motion_plane": "horizontal_local_xz", "feature_values": {"oval_path_score": 0.7, "ellipse_fit_score": 0.7, "closed_loop_ratio": 0.7, "grind_pattern_score": 0.7, "transition_path_score": 0.8 if cat == "transition" else 0.1, "jitter_score": 0.1}})
+        match_rows.append({"window_id": wid, "cowgirl_relative_score": 0.7, "cowgirl_grind_trajectory_score": 0.7, "recommended_review_status": "likely_cowgirl_candidate", "safe_for_learning": safe})
+        role = "likely_receiver_body_response" if cat == "receiver" else "likely_active_rider"
+        rider_rows.append({"window_id": wid, "rider_receiver_status": role, "active_rider_score": 0.8 if role == "likely_active_rider" else 0.1, "receiver_body_response_score": 0.8 if role == "likely_receiver_body_response" else 0.1})
+        pose_rows.append({"window_id": wid, "export_pose_validity": "broken_pose" if cat == "problem" else "good", "generation_template_safe": cat == "generation", "low_motion_intro_candidate": cat == "intro", "too_short_for_semantic_judgment": False, "motion_strength_score": 0.9, "review_export_available": True, "semantic_motion_likely_valid": True})
+        score_rows.append({
+            "window_id": wid,
+            "duration_seconds": 4.0,
+            "semantic_cowgirl_candidate_v5": cat in {"semantic", "generation", "intro", "problem"},
+            "generation_candidate_v5": cat == "generation",
+            "final_semantic_cowgirl_score_v5": 0.9 - idx * 0.01,
+            "final_generation_candidate_score_v5": 0.8 if cat == "generation" else 0.0,
+            "cowgirl_context_low_motion_intro": cat == "intro",
+            "likely_receiver_response": cat == "receiver",
+            "likely_head_or_bj_false_positive": cat == "head",
+            "likely_transition_or_adjustment": cat == "transition",
+            "semantically_good_but_not_generation_safe": cat == "problem",
+            "export_pose_validity": "broken_pose" if cat == "problem" else "good",
+            "generation_template_safe": cat == "generation",
+            "safe_for_learning": safe,
+            "trajectory_shape_classification": "oval_grind",
+        })
+    write_jsonl(run / "relative_motion" / "relative_motion_features.jsonl", rel_rows)
+    write_jsonl(run / "relative_motion" / "trajectory_shape_features.jsonl", traj_rows)
+    write_jsonl(run / "relative_motion" / "relative_reference_matches.jsonl", match_rows)
+    write_jsonl(run / "audits" / "rider_receiver_scores_v1.jsonl", rider_rows)
+    write_jsonl(run / "audits" / "pose_export_validity.jsonl", pose_rows)
+    write_jsonl(run / "audits" / "cowgirl_candidate_scores_v5.jsonl", score_rows)
+    out = run / "audits" / "semantic_review_010_v7"
+    export_semantic_review_010(run, out, count=10, attempt_timeline_export=False, use_cowgirl_candidate_score_v5=True, use_pose_export_validity=True)
+    rows = load_jsonl(out / "semantic_review_010.jsonl")
+    categories = {r["category"] for r in rows}
+    assert "semantic_cowgirl" in categories
+    assert "generation_safe_cowgirl" in categories
+    assert all("clean_cowgirl_candidate_score_v5" in r["evidence"] for r in rows)

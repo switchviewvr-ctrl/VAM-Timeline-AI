@@ -106,6 +106,47 @@ def score_cowgirl_candidates_v4(
     return rows
 
 
+def score_cowgirl_candidates_v5(
+    run_dir: str | Path,
+    relative_reference_matches: str | Path,
+    relative_features: str | Path,
+    trajectory_features: str | Path,
+    body_quality: str | Path,
+    rider_receiver_scores: str | Path,
+    pose_export_validity: str | Path,
+    features: str | Path,
+    out_jsonl: str | Path,
+    report: str | Path,
+) -> list[dict[str, Any]]:
+    """Score semantic Cowgirl separately from generation/export usability."""
+    run = Path(run_dir)
+    windows = {r.get("window_id"): r for r in load_jsonl(run / "semantic" / "movement_windows.jsonl") if r.get("window_id")}
+    rel_matches = {r.get("window_id"): r for r in load_jsonl(relative_reference_matches) if r.get("window_id")}
+    rel_features = {r.get("window_id"): r for r in load_jsonl(relative_features) if r.get("window_id")}
+    trajectories = {r.get("window_id"): r for r in load_jsonl(trajectory_features) if r.get("window_id")}
+    body = {r.get("window_id"): r for r in load_jsonl(body_quality) if r.get("window_id")}
+    rider_receiver = {r.get("window_id"): r for r in load_jsonl(rider_receiver_scores) if r.get("window_id")}
+    pose_validity = {r.get("window_id"): r for r in load_jsonl(pose_export_validity) if r.get("window_id")}
+    feature_rows = {r.get("window_id"): r for r in load_jsonl(features) if r.get("window_id")}
+    rows = [
+        score_window_v5(
+            feature_rows[wid],
+            body.get(wid, {}),
+            rel_matches.get(wid, {}),
+            rel_features.get(wid, {}),
+            trajectories.get(wid, {}),
+            windows.get(wid, {}),
+            rider_receiver.get(wid, {}),
+            pose_validity.get(wid, {}),
+        )
+        for wid in feature_rows
+    ]
+    rows.sort(key=lambda r: float(r.get("final_semantic_cowgirl_score_v5") or 0.0), reverse=True)
+    write_jsonl(out_jsonl, rows)
+    _write_report_v5(rows, report)
+    return rows
+
+
 def score_window(feature_row: dict[str, Any], body: dict[str, Any], match: dict[str, Any], window: dict[str, Any]) -> dict[str, Any]:
     values = feature_row.get("feature_values", {}) or {}
     duration = _num(window.get("duration_seconds") or window.get("window_size_seconds") or 0.0)
@@ -389,6 +430,93 @@ def score_window_v4(
     }
 
 
+def score_window_v5(
+    feature_row: dict[str, Any],
+    body: dict[str, Any],
+    relative_match: dict[str, Any],
+    relative_feature: dict[str, Any],
+    trajectory: dict[str, Any],
+    window: dict[str, Any],
+    rider_receiver: dict[str, Any] | None = None,
+    pose_validity: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    v4 = score_window_v4(feature_row, body, relative_match, relative_feature, trajectory, window, rider_receiver)
+    pose_validity = pose_validity or {}
+    duration = _num(v4.get("duration_seconds"))
+    fv = relative_feature.get("feature_values", {}) or {}
+    tv = trajectory.get("feature_values", {}) or {}
+    export_validity = str(pose_validity.get("export_pose_validity") or "unknown")
+    semantic_hint = pose_validity.get("semantic_motion_likely_valid", "unknown")
+    generation_template_safe = bool(pose_validity.get("generation_template_safe"))
+    low_motion_intro = bool(pose_validity.get("low_motion_intro_candidate"))
+    too_short = bool(pose_validity.get("too_short_for_semantic_judgment")) or duration < 4.0
+    broken_pose = export_validity == "broken_pose" or bool(pose_validity.get("pose_broken_score"))
+    export_unavailable = export_validity == "export_unavailable"
+    review_only_absolute = export_validity == "review_only_absolute_pose"
+    motion_strength = max(
+        _num(pose_validity.get("motion_strength_score")),
+        min(_num(fv.get("local_path_length")) / 0.8, 1.0),
+        min(_num(fv.get("local_motion_energy")) / 2.0, 1.0),
+    )
+    clean_motion_strength_score = 0.0 if low_motion_intro else motion_strength
+    intro_low_motion_penalty = 0.45 if low_motion_intro else 0.0
+    too_short_penalty = 0.35 if too_short else 0.0
+    broken_pose_penalty_for_export_only = 0.85 if broken_pose else 0.0
+    export_pose_validity_score = {
+        "good": 1.0,
+        "review_only_absolute_pose": 0.55,
+        "unknown": 0.60,
+        "broken_pose": 0.05,
+        "export_unavailable": 0.0,
+    }.get(export_validity, 0.45)
+    heuristic_generation_safe = bool(
+        v4.get("safe_for_learning")
+        and duration >= 4.0
+        and not v4.get("likely_receiver_response")
+        and not v4.get("likely_static_or_jitter")
+        and not v4.get("likely_head_or_bj_false_positive")
+        and motion_strength >= 0.35
+    )
+    generation_template_safety_score = 1.0 if generation_template_safe else (0.72 if heuristic_generation_safe and not broken_pose and not export_unavailable else 0.20 if heuristic_generation_safe else 0.0)
+    semantic_cowgirl_motion_score = _num(v4.get("final_clean_cowgirl_score_v4"))
+    if semantic_hint is True:
+        semantic_cowgirl_motion_score = max(semantic_cowgirl_motion_score, 0.72)
+    elif semantic_hint is False:
+        semantic_cowgirl_motion_score *= 0.35
+    final_semantic = max(0.0, min(1.0, semantic_cowgirl_motion_score * max(0.0, 1.0 - intro_low_motion_penalty - too_short_penalty)))
+    generation_penalty = broken_pose_penalty_for_export_only + (0.55 if export_unavailable else 0.0) + intro_low_motion_penalty + too_short_penalty
+    if review_only_absolute:
+        generation_penalty += 0.20
+    final_generation = max(0.0, min(1.0, final_semantic * generation_template_safety_score * max(0.0, clean_motion_strength_score) * max(0.0, 1.0 - generation_penalty)))
+    out = dict(v4)
+    out.update(
+        {
+            "semantic_cowgirl_motion_score": round(float(semantic_cowgirl_motion_score), 6),
+            "export_pose_validity_score": round(float(export_pose_validity_score), 6),
+            "generation_template_safety_score": round(float(generation_template_safety_score), 6),
+            "clean_motion_strength_score": round(float(clean_motion_strength_score), 6),
+            "intro_low_motion_penalty": round(float(intro_low_motion_penalty), 6),
+            "too_short_penalty": round(float(too_short_penalty), 6),
+            "broken_pose_penalty_for_export_only": round(float(broken_pose_penalty_for_export_only), 6),
+            "final_semantic_cowgirl_score_v5": round(float(final_semantic), 6),
+            "final_generation_candidate_score_v5": round(float(final_generation), 6),
+            "semantic_cowgirl_candidate_v5": bool(final_semantic >= 0.50 and not v4.get("likely_receiver_response") and not v4.get("likely_head_or_bj_false_positive")),
+            "generation_candidate_v5": bool(final_generation >= 0.20 and not broken_pose and not export_unavailable),
+            "semantically_good_but_not_generation_safe": bool(final_semantic >= 0.50 and final_generation < 0.20),
+            "cowgirl_context_low_motion_intro": bool(low_motion_intro),
+            "export_pose_validity": export_validity,
+            "generation_template_safe": generation_template_safe,
+            "review_export_available": bool(pose_validity.get("review_export_available")) if pose_validity else None,
+            "uses_absolute_review_coordinates": bool(pose_validity.get("uses_absolute_review_coordinates")) if pose_validity else None,
+            "pose_export_validity": pose_validity,
+            "trajectory_shape_classification": trajectory.get("trajectory_shape_classification") or v4.get("trajectory_shape_classification"),
+            "warning": "V5 separates semantic Cowgirl likelihood from generation/export template usability.",
+            "is_human_ground_truth": False,
+        }
+    )
+    return out
+
+
 def _write_report(rows: list[dict[str, Any]], report: str | Path) -> None:
     target = Path(report)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -492,6 +620,43 @@ def _write_report_v4(rows: list[dict[str, Any]], report: str | Path) -> None:
             f"shape={row.get('trajectory_shape_classification')} grind={row.get('trajectory_grind_score')} "
             f"role={row.get('role_status')} safe={row.get('safe_for_learning')} reject={row.get('reject_reasons')}"
         )
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_report_v5(rows: list[dict[str, Any]], report: str | Path) -> None:
+    target = Path(report)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    semantic = [r for r in rows if r.get("semantic_cowgirl_candidate_v5")]
+    generation = [r for r in rows if r.get("generation_candidate_v5")]
+    broken = [r for r in rows if r.get("export_pose_validity") == "broken_pose"]
+    low_intro = [r for r in rows if r.get("cowgirl_context_low_motion_intro")]
+    receiver = [r for r in rows if r.get("likely_receiver_response")]
+    validity_counts = Counter(r.get("export_pose_validity") for r in rows)
+    lines = [
+        "# Cowgirl Candidate Score V5 Report",
+        "",
+        "V5 separates semantic Cowgirl likelihood from export/pose/generation-template usability. These are audit scores, not labels.",
+        "",
+        f"- Windows scored: {len(rows)}",
+        f"- Semantic Cowgirl candidates: {len(semantic)}",
+        f"- Generation candidate scores above threshold: {len(generation)}",
+        f"- Known broken-pose review items: {len(broken)}",
+        f"- Cowgirl context / low-motion intro candidates: {len(low_intro)}",
+        f"- Receiver/body-response excluded candidates: {len(receiver)}",
+        "",
+        "## Export Pose Validity",
+        "",
+    ]
+    lines.extend(f"- `{k}`: {v}" for k, v in validity_counts.most_common()) if validity_counts else lines.append("- None")
+    lines.extend(["", "## Top Semantic Cowgirl Candidates", ""])
+    for row in sorted(rows, key=lambda r: float(r.get("final_semantic_cowgirl_score_v5") or 0.0), reverse=True)[:20]:
+        lines.append(f"- `{row.get('window_id')}` semantic={row.get('final_semantic_cowgirl_score_v5')} generation={row.get('final_generation_candidate_score_v5')} validity={row.get('export_pose_validity')} shape={row.get('trajectory_shape_classification')}")
+    lines.extend(["", "## Top Generation Candidate Scores", ""])
+    for row in sorted(rows, key=lambda r: float(r.get("final_generation_candidate_score_v5") or 0.0), reverse=True)[:20]:
+        lines.append(f"- `{row.get('window_id')}` generation={row.get('final_generation_candidate_score_v5')} semantic={row.get('final_semantic_cowgirl_score_v5')} safe={row.get('generation_template_safety_score')} validity={row.get('export_pose_validity')}")
+    lines.extend(["", "## Semantically Good But Not Generation-Safe", ""])
+    flagged = [r for r in rows if r.get("semantically_good_but_not_generation_safe")]
+    lines.extend(f"- `{r.get('window_id')}` semantic={r.get('final_semantic_cowgirl_score_v5')} validity={r.get('export_pose_validity')}" for r in flagged[:20]) if flagged else lines.append("- None")
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
