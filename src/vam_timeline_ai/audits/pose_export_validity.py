@@ -33,6 +33,7 @@ def audit_pose_export_validity(
     body_quality: str | Path,
     out_jsonl: str | Path,
     report: str | Path,
+    controller_validity: str | Path | None = None,
 ) -> list[dict[str, Any]]:
     review_path = Path(review_dir)
     review_rows = load_jsonl(review_path / "semantic_review_010.jsonl")
@@ -40,8 +41,16 @@ def audit_pose_export_validity(
     samples = {r.get("sample_id"): r for r in load_jsonl(sample_index) if r.get("sample_id")}
     relative = {r.get("window_id"): r for r in load_jsonl(relative_index) if r.get("window_id")}
     body = {r.get("window_id"): r for r in load_jsonl(body_quality) if r.get("window_id")}
+    controller = {r.get("window_id"): r for r in load_jsonl(controller_validity) if r.get("window_id")} if controller_validity else {}
     rows = [
-        pose_export_validity_for_review_item(row, answers.get(row.get("review_id"), {}), samples.get(row.get("sample_id"), {}), relative.get(row.get("window_id"), {}), body.get(row.get("window_id"), {}))
+        pose_export_validity_for_review_item(
+            row,
+            answers.get(row.get("review_id"), {}),
+            samples.get(row.get("sample_id"), {}),
+            relative.get(row.get("window_id"), {}),
+            body.get(row.get("window_id"), {}),
+            controller.get(row.get("window_id"), {}),
+        )
         for row in review_rows
     ]
     write_jsonl(out_jsonl, rows)
@@ -55,11 +64,13 @@ def pose_export_validity_for_review_item(
     sample: dict[str, Any] | None,
     relative: dict[str, Any] | None,
     body: dict[str, Any] | None,
+    controller: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     answer = answer or {}
     sample = sample or {}
     relative = relative or {}
     body = body or {}
+    controller = controller or {}
     labels = {str(x) for x in (answer.get("actual_labels") or [])}
     verdict = str(answer.get("user_verdict") or "unknown")
     has_export = bool(review_row.get("has_timeline_export"))
@@ -82,6 +93,8 @@ def pose_export_validity_for_review_item(
         export_pose_validity = "export_unavailable"
     elif broken:
         export_pose_validity = "broken_pose"
+    elif controller.get("controller_validity_status") == "invalid" or controller.get("foot_controller_outlier"):
+        export_pose_validity = "broken_pose"
     elif has_export and semantic_positive and not broken:
         export_pose_validity = "good"
     elif has_export:
@@ -95,9 +108,21 @@ def pose_export_validity_for_review_item(
     motion_strength_adequate = motion_strength >= 0.35 and not bool(body.get("static_or_micro_motion"))
     has_required = _has_required_body_controllers(relative)
     teleport_risk = str(relative.get("teleport_risk") or "unknown")
+    controller_status = str(controller.get("controller_validity_status") or "unknown")
+    foot_outlier = bool(controller.get("foot_controller_outlier") or "foot_controller_outlier" in labels)
+    hand_outlier = bool(controller.get("hand_controller_outlier") or "hand_controller_outlier" in labels)
+    controller_outlier_count = int(controller.get("controller_outlier_count") or 0)
+    if foot_outlier and not controller.get("foot_controller_outlier"):
+        controller_outlier_count += 1
+    if hand_outlier and not controller.get("hand_controller_outlier"):
+        controller_outlier_count += 1
+    controller_generation_ok = True
+    if controller:
+        controller_generation_ok = controller.get("generation_pose_valid") is True and controller_status == "valid" and not foot_outlier
     generation_safe = bool(
         not export_unavailable
         and not broken
+        and controller_generation_ok
         and semantic_valid is True
         and has_required
         and duration_ok
@@ -108,6 +133,10 @@ def pose_export_validity_for_review_item(
     warnings = []
     if broken:
         warnings.append("Semantics may be correct, but reviewed/exported pose was broken.")
+    if foot_outlier:
+        warnings.append("Foot controller outlier blocks generation-template use but does not automatically make semantics wrong.")
+    if hand_outlier:
+        warnings.append("Hand controller outlier requires pose/controller inspection.")
     if export_unavailable:
         warnings.append("Export unavailable is not counted as semantic wrong.")
     if low_motion_intro:
@@ -116,6 +145,22 @@ def pose_export_validity_for_review_item(
         warnings.append("Window is too short for confident semantic motion judgment.")
     if not generation_safe:
         warnings.append("Not safe as generation template without further validation.")
+    invalid_reasons = []
+    if broken:
+        invalid_reasons.append("human_review_pose_broken")
+    if foot_outlier:
+        invalid_reasons.append("foot_controller_outlier")
+    if hand_outlier:
+        invalid_reasons.append("hand_controller_outlier")
+    if controller_status == "invalid":
+        invalid_reasons.append("controller_validity_invalid")
+    if export_unavailable:
+        invalid_reasons.append("export_unavailable")
+    if low_motion_intro:
+        invalid_reasons.append("low_motion_intro")
+    if too_short:
+        invalid_reasons.append("too_short")
+    export_valid_reason = "valid_for_review_export" if export_pose_validity == "good" else "review_only_or_blocked"
     return {
         "review_id": review_row.get("review_id"),
         "window_id": review_row.get("window_id"),
@@ -134,6 +179,14 @@ def pose_export_validity_for_review_item(
         "duration_adequate_for_semantic_judgment": duration_ok,
         "motion_strength_adequate": motion_strength_adequate,
         "motion_strength_score": round(float(motion_strength), 6),
+        "controller_validity_status": controller_status,
+        "controller_validity_score": controller.get("controller_validity_score"),
+        "foot_controller_outlier": foot_outlier,
+        "hand_controller_outlier": hand_outlier,
+        "controller_outlier_count": controller_outlier_count,
+        "generation_pose_invalid_reason": invalid_reasons,
+        "export_pose_valid_reason": export_valid_reason,
+        "controller_validity": controller,
         "low_motion_intro_candidate": low_motion_intro,
         "too_short_for_semantic_judgment": too_short,
         "review_export_available": has_export,
@@ -177,12 +230,15 @@ def _write_report(rows: list[dict[str, Any]], report: str | Path) -> None:
     validity = Counter(r.get("export_pose_validity") for r in rows)
     semantic = Counter(str(r.get("semantic_motion_likely_valid")) for r in rows)
     generation = Counter("safe" if r.get("generation_template_safe") else "blocked" for r in rows)
+    controller = Counter(r.get("controller_validity_status") for r in rows)
+    foot = sum(1 for r in rows if r.get("foot_controller_outlier"))
     lines = [
         "# Pose / Export Validity Report",
         "",
         "This audit separates semantic correctness from export/pose/generation-template usability.",
         "",
         f"- Review items: {len(rows)}",
+        f"- Foot/controller outlier items: {foot}",
         "",
         "## Semantic Motion Likely Valid",
         "",
@@ -192,6 +248,8 @@ def _write_report(rows: list[dict[str, Any]], report: str | Path) -> None:
     lines.extend(f"- `{k}`: {v}" for k, v in validity.most_common())
     lines.extend(["", "## Generation Template Safety", ""])
     lines.extend(f"- `{k}`: {v}" for k, v in generation.most_common())
+    lines.extend(["", "## Controller Validity", ""])
+    lines.extend(f"- `{k}`: {v}" for k, v in controller.most_common()) if controller else lines.append("- None")
     lines.extend(["", "## Semantically Good But Not Generation-Safe", ""])
     examples = [r for r in rows if r.get("semantic_motion_likely_valid") is True and not r.get("generation_template_safe")]
     if examples:
@@ -200,4 +258,3 @@ def _write_report(rows: list[dict[str, Any]], report: str | Path) -> None:
     else:
         lines.append("- None")
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
-

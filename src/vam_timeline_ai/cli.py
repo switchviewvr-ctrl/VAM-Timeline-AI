@@ -74,11 +74,13 @@ def build_parser() -> argparse.ArgumentParser:
     semantic_review.add_argument("--use-cowgirl-candidate-score-v3", default="false")
     semantic_review.add_argument("--use-cowgirl-candidate-score-v4", default="false")
     semantic_review.add_argument("--use-cowgirl-candidate-score-v5", default="false")
+    semantic_review.add_argument("--use-cowgirl-candidate-score-v6", default="false")
     semantic_review.add_argument("--use-rider-receiver-discrimination", default="false")
     semantic_review.add_argument("--use-relative-motion-features", default="false")
     semantic_review.add_argument("--use-trajectory-shape-features", default="false")
     semantic_review.add_argument("--use-relative-reference-matches", default="false")
     semantic_review.add_argument("--use-pose-export-validity", default="false")
+    semantic_review.add_argument("--use-controller-validity", default="false")
 
     semantic_summary = subparsers.add_parser("summarize-semantic-review-010", help="Summarize user answers for the 10-item semantic review.")
     semantic_summary.add_argument("--answers", required=True)
@@ -211,8 +213,17 @@ def build_parser() -> argparse.ArgumentParser:
     pose_export.add_argument("--sample-index", required=True)
     pose_export.add_argument("--relative-index", required=True)
     pose_export.add_argument("--body-quality", required=True)
+    pose_export.add_argument("--controller-validity", default=None)
     pose_export.add_argument("--out-jsonl", required=True)
     pose_export.add_argument("--report", required=True)
+
+    controller_validity = subparsers.add_parser("audit-controller-validity", help="Audit anatomical/controller plausibility for relative motion windows.")
+    controller_validity.add_argument("--run-dir", required=True)
+    controller_validity.add_argument("--relative-index", required=True)
+    controller_validity.add_argument("--sample-index", required=True)
+    controller_validity.add_argument("--controller-map", required=True)
+    controller_validity.add_argument("--out-jsonl", required=True)
+    controller_validity.add_argument("--report", required=True)
 
     cowgirl_score_v5 = subparsers.add_parser("score-cowgirl-candidates-v5", help="Score semantic Cowgirl separately from generation/export usability.")
     cowgirl_score_v5.add_argument("--run-dir", required=True)
@@ -225,6 +236,19 @@ def build_parser() -> argparse.ArgumentParser:
     cowgirl_score_v5.add_argument("--features", required=True)
     cowgirl_score_v5.add_argument("--out-jsonl", required=True)
     cowgirl_score_v5.add_argument("--report", required=True)
+
+    cowgirl_score_v6 = subparsers.add_parser("score-cowgirl-candidates-v6", help="Score Cowgirl semantics/context/clean motion separately from controller generation safety.")
+    cowgirl_score_v6.add_argument("--run-dir", required=True)
+    cowgirl_score_v6.add_argument("--relative-reference-matches", required=True)
+    cowgirl_score_v6.add_argument("--relative-features", required=True)
+    cowgirl_score_v6.add_argument("--trajectory-features", required=True)
+    cowgirl_score_v6.add_argument("--body-quality", required=True)
+    cowgirl_score_v6.add_argument("--rider-receiver-scores", required=True)
+    cowgirl_score_v6.add_argument("--pose-export-validity", required=True)
+    cowgirl_score_v6.add_argument("--controller-validity", required=True)
+    cowgirl_score_v6.add_argument("--features", required=True)
+    cowgirl_score_v6.add_argument("--out-jsonl", required=True)
+    cowgirl_score_v6.add_argument("--report", required=True)
 
     cmap = subparsers.add_parser("discover-controller-map", help="Discover controller names and conservative body-part mapping.")
     cmap.add_argument("--sample-index", required=True)
@@ -874,10 +898,21 @@ def cmd_score_cowgirl_candidates_v4(args: argparse.Namespace) -> int:
 def cmd_audit_pose_export_validity(args: argparse.Namespace) -> int:
     from vam_timeline_ai.audits.pose_export_validity import audit_pose_export_validity
 
-    rows = audit_pose_export_validity(args.run_dir, args.review_dir, args.sample_index, args.relative_index, args.body_quality, args.out_jsonl, args.report)
+    rows = audit_pose_export_validity(args.run_dir, args.review_dir, args.sample_index, args.relative_index, args.body_quality, args.out_jsonl, args.report, args.controller_validity)
     safe = sum(1 for row in rows if row.get("generation_template_safe"))
     print(f"Pose/export validity audit written: {args.out_jsonl}")
     print(f"Rows: {len(rows)}; generation_template_safe: {safe}")
+    return 0
+
+
+def cmd_audit_controller_validity(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.controller_validity import audit_controller_validity
+
+    rows = audit_controller_validity(args.run_dir, args.relative_index, args.sample_index, args.controller_map, args.out_jsonl, args.report)
+    foot = sum(1 for row in rows if row.get("foot_controller_outlier"))
+    invalid = sum(1 for row in rows if row.get("controller_validity_status") == "invalid")
+    print(f"Controller validity audit written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; invalid: {invalid}; foot_outliers: {foot}")
     return 0
 
 
@@ -900,6 +935,30 @@ def cmd_score_cowgirl_candidates_v5(args: argparse.Namespace) -> int:
     generation = sum(1 for row in rows if row.get("generation_candidate_v5"))
     print(f"Cowgirl candidate scores v5 written: {args.out_jsonl}")
     print(f"Rows: {len(rows)}; semantic candidates: {semantic}; generation candidates: {generation}")
+    return 0
+
+
+def cmd_score_cowgirl_candidates_v6(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_cowgirl_candidates_v6
+
+    rows = score_cowgirl_candidates_v6(
+        args.run_dir,
+        args.relative_reference_matches,
+        args.relative_features,
+        args.trajectory_features,
+        args.body_quality,
+        args.rider_receiver_scores,
+        args.pose_export_validity,
+        args.controller_validity,
+        args.features,
+        args.out_jsonl,
+        args.report,
+    )
+    semantic = sum(1 for row in rows if row.get("semantic_cowgirl_candidate_v6"))
+    generation = sum(1 for row in rows if row.get("generation_candidate_v6"))
+    invalid = sum(1 for row in rows if row.get("semantically_cowgirl_but_controller_invalid"))
+    print(f"Cowgirl candidate scores v6 written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; semantic candidates: {semantic}; generation candidates: {generation}; semantic-controller-invalid: {invalid}")
     return 0
 
 
@@ -1469,11 +1528,13 @@ def cmd_export_semantic_review_010(args: argparse.Namespace) -> int:
         use_cowgirl_candidate_score_v3=_arg_bool(args.use_cowgirl_candidate_score_v3),
         use_cowgirl_candidate_score_v4=_arg_bool(args.use_cowgirl_candidate_score_v4),
         use_cowgirl_candidate_score_v5=_arg_bool(args.use_cowgirl_candidate_score_v5),
+        use_cowgirl_candidate_score_v6=_arg_bool(args.use_cowgirl_candidate_score_v6),
         use_rider_receiver_discrimination=_arg_bool(args.use_rider_receiver_discrimination),
         use_relative_motion_features=_arg_bool(args.use_relative_motion_features),
         use_trajectory_shape_features=_arg_bool(args.use_trajectory_shape_features),
         use_relative_reference_matches=_arg_bool(args.use_relative_reference_matches),
         use_pose_export_validity=_arg_bool(args.use_pose_export_validity),
+        use_controller_validity=_arg_bool(args.use_controller_validity),
     )
     print(f"Semantic review 010 written: {args.out_dir}")
     print(f"Review items: {summary['review_items']}; categories={summary['category_distribution']}")
@@ -1580,8 +1641,12 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_score_cowgirl_candidates_v4(args)
     if args.command == "audit-pose-export-validity":
         return cmd_audit_pose_export_validity(args)
+    if args.command == "audit-controller-validity":
+        return cmd_audit_controller_validity(args)
     if args.command == "score-cowgirl-candidates-v5":
         return cmd_score_cowgirl_candidates_v5(args)
+    if args.command == "score-cowgirl-candidates-v6":
+        return cmd_score_cowgirl_candidates_v6(args)
     if args.command == "discover-controller-map":
         return cmd_discover_controller_map(args)
     if args.command == "extract-cowgirl-features-v1":

@@ -4,13 +4,14 @@ import numpy as np
 
 from vam_timeline_ai.audits.semantic_review import export_semantic_review_010
 from vam_timeline_ai.audits.pose_export_validity import pose_export_validity_for_review_item
+from vam_timeline_ai.audits.controller_validity import controller_validity_for_arrays
 from vam_timeline_ai.features.relative_features import relative_features_from_arrays
 from vam_timeline_ai.features.trajectory_shape import trajectory_shape_for_points
 from vam_timeline_ai.io.json_utils import load_jsonl, write_jsonl
 from vam_timeline_ai.motion.coordinate_spaces import can_use_for_final_export, is_allowed_body_controller_track, is_disallowed_world_or_root_track
 from vam_timeline_ai.motion.relative_motion import build_relative_motion_window_row
 from vam_timeline_ai.references.relative_matcher import compare_relative_wild_to_handmade
-from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_window_v4, score_window_v5
+from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_window_v4, score_window_v5, score_window_v6
 
 
 def _times(n=121):
@@ -284,3 +285,127 @@ def test_semantic_review_v7_includes_semantic_and_generation_categories(tmp_path
     assert "semantic_cowgirl" in categories
     assert "generation_safe_cowgirl" in categories
     assert all("clean_cowgirl_candidate_score_v5" in r["evidence"] for r in rows)
+
+
+def test_controller_validity_detects_synthetic_foot_outlier():
+    n = 20
+    hip = np.zeros((n, 3), dtype=np.float32)
+    knee = np.tile(np.array([0.0, -0.45, 0.0], dtype=np.float32), (n, 1))
+    foot = np.tile(np.array([4.5, -0.55, 0.0], dtype=np.float32), (n, 1))
+    positions = np.stack([hip, knee, foot], axis=1)
+    row = controller_validity_for_arrays(positions, ["hip", "left_knee", "left_foot"], scale=1.0, row={"window_id": "win"})
+    assert row["foot_controller_outlier"]
+    assert row["controller_validity_status"] == "invalid"
+    assert row["generation_pose_valid"] is False
+
+
+def test_controller_validity_passes_plausible_foot_chain():
+    n = 20
+    hip = np.zeros((n, 3), dtype=np.float32)
+    knee = np.tile(np.array([0.0, -0.45, 0.05], dtype=np.float32), (n, 1))
+    foot = np.tile(np.array([0.08, -0.9, 0.10], dtype=np.float32), (n, 1))
+    positions = np.stack([hip, knee, foot], axis=1)
+    row = controller_validity_for_arrays(positions, ["hip", "left_knee", "left_foot"], scale=1.0, row={"window_id": "win"})
+    assert not row["foot_controller_outlier"]
+    assert row["controller_validity_status"] == "valid"
+    assert row["generation_pose_valid"] is True
+
+
+def _v6_score(controller_status="valid", foot=False, export_validity="good", low_intro=False):
+    feature = {"window_id": "win", "sample_id": "sample", "source_id": "src", "feature_values": {}}
+    body = {"body_motion_quality": "good_body_motion"}
+    rel_match = {"cowgirl_relative_score": 0.9, "cowgirl_grind_trajectory_score": 0.85, "safe_for_learning": True}
+    rel_feature = {"feature_values": {"safe_for_learning": 1.0, "local_path_length": 1.0, "local_motion_energy": 1.0}, "feature_quality": {"teleport_risk": "low"}}
+    traj = {"trajectory_shape_classification": "oval_grind", "feature_values": {"oval_path_score": 0.85, "ellipse_fit_score": 0.8, "closed_loop_ratio": 0.75, "grind_pattern_score": 0.85, "jitter_score": 0.05, "transition_path_score": 0.05}}
+    window = {"duration_seconds": 4.0}
+    rider = {"rider_receiver_status": "likely_active_rider", "active_rider_score": 0.85, "receiver_body_response_score": 0.05}
+    pose = {"export_pose_validity": export_validity, "generation_template_safe": export_validity == "good", "low_motion_intro_candidate": low_intro, "too_short_for_semantic_judgment": False, "motion_strength_score": 0.9, "review_export_available": export_validity != "export_unavailable", "semantic_motion_likely_valid": True}
+    controller = {"controller_validity_status": controller_status, "controller_validity_score": 0.1 if controller_status == "invalid" else 0.95, "generation_pose_valid": controller_status == "valid", "foot_controller_outlier": foot, "hand_controller_outlier": False, "controller_outlier_count": 1 if foot else 0}
+    return score_window_v6(feature, body, rel_match, rel_feature, traj, window, rider, pose, controller)
+
+
+def test_foot_outlier_lowers_generation_score_but_not_semantic_score():
+    row = _v6_score(controller_status="invalid", foot=True)
+    assert row["final_semantic_cowgirl_score_v6"] >= 0.5
+    assert row["final_generation_candidate_score_v6"] < 0.05
+    assert row["semantically_cowgirl_but_controller_invalid"]
+    assert not row["generation_candidate_v6"]
+
+
+def test_low_motion_intro_lowers_clean_motion_but_not_context_score():
+    row = _v6_score(low_intro=True)
+    assert row["clean_motion_score"] < 0.4
+    assert row["cowgirl_context_score"] > 0.2
+    assert row["cowgirl_context_low_motion_intro"]
+
+
+def test_export_unavailable_lowers_generation_score_only():
+    row = _v6_score(export_validity="export_unavailable")
+    assert row["final_semantic_cowgirl_score_v6"] >= 0.5
+    assert row["final_generation_candidate_score_v6"] == 0.0
+    assert not row["generation_candidate_v6"]
+
+
+def test_semantic_review_v8_includes_controller_validity_and_excludes_foot_outlier_generation_safe(tmp_path):
+    from tests.test_semantic_review import _make_run
+
+    run = _make_run(tmp_path)
+    for rel in ["relative_motion"]:
+        (run / rel).mkdir(parents=True, exist_ok=True)
+    rel_rows = []
+    traj_rows = []
+    match_rows = []
+    rider_rows = []
+    pose_rows = []
+    controller_rows = []
+    score_rows = []
+    cats = ["semantic", "semantic", "semantic", "generation", "generation", "invalid", "invalid", "intro", "receiver", "unknown", "fallback", "fallback"]
+    for idx, cat in enumerate(cats):
+        wid = f"win_{idx:02d}"
+        foot = cat == "invalid"
+        controller_status = "invalid" if foot else "valid"
+        export_validity = "export_unavailable" if cat == "unknown" else "good"
+        rel_rows.append({"window_id": wid, "feature_values": {"safe_for_learning": 1.0}, "feature_quality": {"teleport_risk": "low"}})
+        traj_rows.append({"window_id": wid, "trajectory_shape_classification": "oval_grind", "dominant_motion_plane": "horizontal_local_xz", "feature_values": {"oval_path_score": 0.8, "ellipse_fit_score": 0.8, "closed_loop_ratio": 0.7, "grind_pattern_score": 0.8, "transition_path_score": 0.1, "jitter_score": 0.1}})
+        match_rows.append({"window_id": wid, "cowgirl_relative_score": 0.85, "cowgirl_grind_trajectory_score": 0.8, "recommended_review_status": "likely_cowgirl_candidate", "safe_for_learning": True})
+        role = "likely_receiver_body_response" if cat == "receiver" else "likely_active_rider"
+        rider_rows.append({"window_id": wid, "rider_receiver_status": role, "active_rider_score": 0.8 if role == "likely_active_rider" else 0.1, "receiver_body_response_score": 0.8 if role == "likely_receiver_body_response" else 0.1})
+        pose_rows.append({"window_id": wid, "export_pose_validity": export_validity, "generation_template_safe": cat == "generation", "low_motion_intro_candidate": cat == "intro", "too_short_for_semantic_judgment": False, "motion_strength_score": 0.9, "review_export_available": export_validity != "export_unavailable", "semantic_motion_likely_valid": True, "controller_validity_status": controller_status, "foot_controller_outlier": foot})
+        controller_rows.append({"window_id": wid, "controller_validity_status": controller_status, "controller_validity_score": 0.1 if foot else 0.95, "generation_pose_valid": controller_status == "valid", "foot_controller_outlier": foot, "hand_controller_outlier": False, "controller_outlier_count": 1 if foot else 0})
+        score_rows.append({
+            "window_id": wid,
+            "duration_seconds": 4.0,
+            "semantic_cowgirl_candidate_v6": cat in {"semantic", "generation", "invalid", "intro"},
+            "clean_motion_candidate_v6": cat in {"semantic", "generation", "invalid"},
+            "generation_candidate_v6": cat == "generation",
+            "semantically_cowgirl_but_controller_invalid": cat == "invalid",
+            "cowgirl_context_low_motion_intro": cat == "intro",
+            "likely_receiver_response": cat == "receiver",
+            "likely_head_or_bj_false_positive": False,
+            "final_semantic_cowgirl_score_v6": 0.9 - idx * 0.02,
+            "final_generation_candidate_score_v6": 0.8 if cat == "generation" else 0.0,
+            "controller_validity_score": 0.1 if foot else 0.95,
+            "controller_validity_status": controller_status,
+            "foot_controller_outlier": foot,
+            "hand_controller_outlier": False,
+            "controller_outlier_count": 1 if foot else 0,
+            "cowgirl_context_score": 0.7 if cat == "intro" else 0.1,
+            "clean_motion_score": 0.8 if cat != "intro" else 0.2,
+            "export_pose_validity": export_validity,
+        })
+    write_jsonl(run / "relative_motion" / "relative_motion_features.jsonl", rel_rows)
+    write_jsonl(run / "relative_motion" / "trajectory_shape_features.jsonl", traj_rows)
+    write_jsonl(run / "relative_motion" / "relative_reference_matches.jsonl", match_rows)
+    write_jsonl(run / "audits" / "rider_receiver_scores_v1.jsonl", rider_rows)
+    write_jsonl(run / "audits" / "pose_export_validity.jsonl", pose_rows)
+    write_jsonl(run / "audits" / "controller_validity.jsonl", controller_rows)
+    write_jsonl(run / "audits" / "cowgirl_candidate_scores_v6.jsonl", score_rows)
+    out = run / "audits" / "semantic_review_010_v8"
+    export_semantic_review_010(run, out, count=10, attempt_timeline_export=False, use_cowgirl_candidate_score_v6=True, use_controller_validity=True, use_pose_export_validity=True)
+    rows = load_jsonl(out / "semantic_review_010.jsonl")
+    categories = {r["category"] for r in rows}
+    assert "semantic_cowgirl_controller_invalid" in categories
+    assert all("controller_validity" in r["evidence"] for r in rows)
+    generation_safe = [r for r in rows if r["category"] == "generation_safe_cowgirl"]
+    assert generation_safe
+    assert all(not r["system_semantic_guess"]["foot_controller_outlier"] for r in generation_safe)

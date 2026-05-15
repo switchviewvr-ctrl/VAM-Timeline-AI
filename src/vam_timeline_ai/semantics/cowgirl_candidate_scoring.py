@@ -147,6 +147,50 @@ def score_cowgirl_candidates_v5(
     return rows
 
 
+def score_cowgirl_candidates_v6(
+    run_dir: str | Path,
+    relative_reference_matches: str | Path,
+    relative_features: str | Path,
+    trajectory_features: str | Path,
+    body_quality: str | Path,
+    rider_receiver_scores: str | Path,
+    pose_export_validity: str | Path,
+    controller_validity: str | Path,
+    features: str | Path,
+    out_jsonl: str | Path,
+    report: str | Path,
+) -> list[dict[str, Any]]:
+    """Score Cowgirl semantics separately from controller/generation safety."""
+    run = Path(run_dir)
+    windows = {r.get("window_id"): r for r in load_jsonl(run / "semantic" / "movement_windows.jsonl") if r.get("window_id")}
+    rel_matches = {r.get("window_id"): r for r in load_jsonl(relative_reference_matches) if r.get("window_id")}
+    rel_features = {r.get("window_id"): r for r in load_jsonl(relative_features) if r.get("window_id")}
+    trajectories = {r.get("window_id"): r for r in load_jsonl(trajectory_features) if r.get("window_id")}
+    body = {r.get("window_id"): r for r in load_jsonl(body_quality) if r.get("window_id")}
+    rider_receiver = {r.get("window_id"): r for r in load_jsonl(rider_receiver_scores) if r.get("window_id")}
+    pose_validity = {r.get("window_id"): r for r in load_jsonl(pose_export_validity) if r.get("window_id")}
+    controller = {r.get("window_id"): r for r in load_jsonl(controller_validity) if r.get("window_id")}
+    feature_rows = {r.get("window_id"): r for r in load_jsonl(features) if r.get("window_id")}
+    rows = [
+        score_window_v6(
+            feature_rows[wid],
+            body.get(wid, {}),
+            rel_matches.get(wid, {}),
+            rel_features.get(wid, {}),
+            trajectories.get(wid, {}),
+            windows.get(wid, {}),
+            rider_receiver.get(wid, {}),
+            pose_validity.get(wid, {}),
+            controller.get(wid, {}),
+        )
+        for wid in feature_rows
+    ]
+    rows.sort(key=lambda r: float(r.get("final_semantic_cowgirl_score_v6") or 0.0), reverse=True)
+    write_jsonl(out_jsonl, rows)
+    _write_report_v6(rows, report)
+    return rows
+
+
 def score_window(feature_row: dict[str, Any], body: dict[str, Any], match: dict[str, Any], window: dict[str, Any]) -> dict[str, Any]:
     values = feature_row.get("feature_values", {}) or {}
     duration = _num(window.get("duration_seconds") or window.get("window_size_seconds") or 0.0)
@@ -517,6 +561,113 @@ def score_window_v5(
     return out
 
 
+def score_window_v6(
+    feature_row: dict[str, Any],
+    body: dict[str, Any],
+    relative_match: dict[str, Any],
+    relative_feature: dict[str, Any],
+    trajectory: dict[str, Any],
+    window: dict[str, Any],
+    rider_receiver: dict[str, Any] | None = None,
+    pose_validity: dict[str, Any] | None = None,
+    controller_validity: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """V6 keeps semantic, context, clean-motion, and generation scores apart."""
+    v5 = score_window_v5(feature_row, body, relative_match, relative_feature, trajectory, window, rider_receiver, pose_validity)
+    pose_validity = pose_validity or {}
+    controller_validity = controller_validity or {}
+    export_validity = str(pose_validity.get("export_pose_validity") or v5.get("export_pose_validity") or "unknown")
+    controller_status = str(controller_validity.get("controller_validity_status") or pose_validity.get("controller_validity_status") or "unknown")
+    controller_score = _num(controller_validity.get("controller_validity_score"))
+    if not controller_validity:
+        controller_score = 0.35
+    foot_outlier = bool(controller_validity.get("foot_controller_outlier") or pose_validity.get("foot_controller_outlier"))
+    hand_outlier = bool(controller_validity.get("hand_controller_outlier") or pose_validity.get("hand_controller_outlier"))
+    controller_outlier_count = int(controller_validity.get("controller_outlier_count") or pose_validity.get("controller_outlier_count") or 0)
+    if foot_outlier and controller_status == "valid":
+        controller_status = "invalid"
+    export_unavailable = export_validity == "export_unavailable"
+    broken_pose = export_validity == "broken_pose" or foot_outlier or controller_status == "invalid"
+    low_intro = bool(v5.get("cowgirl_context_low_motion_intro") or pose_validity.get("low_motion_intro_candidate"))
+    too_short = bool(v5.get("too_short_penalty")) or bool(pose_validity.get("too_short_for_semantic_judgment"))
+    receiver = bool(v5.get("likely_receiver_response")) or str(v5.get("role_status")) == "likely_receiver_body_response"
+
+    semantic_cowgirl_motion_score = _num(v5.get("final_semantic_cowgirl_score_v5"))
+    if receiver:
+        semantic_cowgirl_motion_score *= 0.35
+    clean_motion_score = _num(v5.get("clean_motion_strength_score"))
+    if low_intro:
+        clean_motion_score *= 0.30
+    if too_short:
+        clean_motion_score *= 0.55
+    cowgirl_context_score = max(
+        semantic_cowgirl_motion_score * (0.72 if low_intro or too_short else 0.45),
+        _num(v5.get("final_clean_cowgirl_score_v4")) * 0.50,
+    )
+    if not (low_intro or too_short):
+        cowgirl_context_score *= 0.55
+    controller_validity_score = float(np.clip(controller_score, 0.0, 1.0))
+    export_score = _num(v5.get("export_pose_validity_score"))
+    if export_unavailable:
+        export_score = 0.0
+    if broken_pose:
+        export_score = min(export_score, 0.08)
+    controller_generation_multiplier = controller_validity_score
+    if controller_status != "valid":
+        controller_generation_multiplier = min(controller_generation_multiplier, 0.40 if controller_status == "warning" else 0.12)
+    if foot_outlier:
+        controller_generation_multiplier = min(controller_generation_multiplier, 0.04)
+    if hand_outlier:
+        controller_generation_multiplier = min(controller_generation_multiplier, 0.45)
+    generation_candidate_score = semantic_cowgirl_motion_score * clean_motion_score * export_score * controller_generation_multiplier
+    if export_unavailable:
+        generation_candidate_score = 0.0
+    final_semantic = float(np.clip(semantic_cowgirl_motion_score, 0.0, 1.0))
+    final_generation = float(np.clip(generation_candidate_score, 0.0, 1.0))
+    semantically_controller_invalid = bool(final_semantic >= 0.50 and (foot_outlier or controller_status == "invalid" or broken_pose) and not receiver)
+    semantic_candidate = bool(final_semantic >= 0.50 and not receiver and not v5.get("likely_head_or_bj_false_positive"))
+    generation_candidate = bool(
+        semantic_candidate
+        and clean_motion_score >= 0.35
+        and final_generation >= 0.20
+        and controller_status == "valid"
+        and not foot_outlier
+        and not hand_outlier
+        and not export_unavailable
+        and not broken_pose
+        and not receiver
+    )
+    clean_candidate = bool(semantic_candidate and clean_motion_score >= 0.35 and not low_intro and not too_short)
+    out = dict(v5)
+    out.update(
+        {
+            "semantic_cowgirl_motion_score": round(float(semantic_cowgirl_motion_score), 6),
+            "clean_motion_score": round(float(clean_motion_score), 6),
+            "cowgirl_context_score": round(float(cowgirl_context_score), 6),
+            "generation_candidate_score": round(float(generation_candidate_score), 6),
+            "controller_validity_score": round(float(controller_validity_score), 6),
+            "final_semantic_cowgirl_score_v6": round(float(final_semantic), 6),
+            "final_generation_candidate_score_v6": round(float(final_generation), 6),
+            "semantic_cowgirl_candidate_v6": semantic_candidate,
+            "clean_motion_candidate_v6": clean_candidate,
+            "generation_candidate_v6": generation_candidate,
+            "semantically_cowgirl_but_controller_invalid": semantically_controller_invalid,
+            "cowgirl_context_low_motion_intro": bool(low_intro),
+            "export_unavailable_for_generation": bool(export_unavailable),
+            "controller_validity_status": controller_status,
+            "foot_controller_outlier": foot_outlier,
+            "hand_controller_outlier": hand_outlier,
+            "controller_outlier_count": controller_outlier_count,
+            "generation_pose_valid": controller_validity.get("generation_pose_valid", pose_validity.get("generation_template_safe")),
+            "controller_validity": controller_validity,
+            "pose_export_validity": pose_validity,
+            "warning": "V6 separates semantic Cowgirl/context/clean-motion scores from controller and generation safety.",
+            "is_human_ground_truth": False,
+        }
+    )
+    return out
+
+
 def _write_report(rows: list[dict[str, Any]], report: str | Path) -> None:
     target = Path(report)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -657,6 +808,58 @@ def _write_report_v5(rows: list[dict[str, Any]], report: str | Path) -> None:
     lines.extend(["", "## Semantically Good But Not Generation-Safe", ""])
     flagged = [r for r in rows if r.get("semantically_good_but_not_generation_safe")]
     lines.extend(f"- `{r.get('window_id')}` semantic={r.get('final_semantic_cowgirl_score_v5')} validity={r.get('export_pose_validity')}" for r in flagged[:20]) if flagged else lines.append("- None")
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_report_v6(rows: list[dict[str, Any]], report: str | Path) -> None:
+    target = Path(report)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    semantic = [r for r in rows if r.get("semantic_cowgirl_candidate_v6")]
+    clean = [r for r in rows if r.get("clean_motion_candidate_v6")]
+    generation = [r for r in rows if r.get("generation_candidate_v6")]
+    invalid = [r for r in rows if r.get("semantically_cowgirl_but_controller_invalid")]
+    context = [r for r in rows if r.get("cowgirl_context_low_motion_intro")]
+    foot = [r for r in rows if r.get("foot_controller_outlier")]
+    status_counts = Counter(r.get("controller_validity_status") for r in rows)
+    lines = [
+        "# Cowgirl Candidate Score V6 Report",
+        "",
+        "V6 separates semantic Cowgirl, Cowgirl context, clean motion, and generation/controller safety. These are audit scores, not training labels.",
+        "",
+        f"- Windows scored: {len(rows)}",
+        f"- Semantic Cowgirl candidates: {len(semantic)}",
+        f"- Clean motion candidates: {len(clean)}",
+        f"- Generation-safe candidates: {len(generation)}",
+        f"- Semantically Cowgirl but controller-invalid candidates: {len(invalid)}",
+        f"- Cowgirl context / low-motion intro candidates: {len(context)}",
+        f"- Foot/controller outlier candidates: {len(foot)}",
+        "",
+        "## Controller Validity Status",
+        "",
+    ]
+    lines.extend(f"- `{k}`: {v}" for k, v in status_counts.most_common()) if status_counts else lines.append("- None")
+    lines.extend(["", "## Top Semantic Cowgirl Candidates", ""])
+    for row in sorted(rows, key=lambda r: float(r.get("final_semantic_cowgirl_score_v6") or 0.0), reverse=True)[:20]:
+        lines.append(
+            f"- `{row.get('window_id')}` semantic={row.get('final_semantic_cowgirl_score_v6')} "
+            f"generation={row.get('final_generation_candidate_score_v6')} controller=`{row.get('controller_validity_status')}` "
+            f"foot_outlier={row.get('foot_controller_outlier')}"
+        )
+    lines.extend(["", "## Top Generation-Safe Candidates", ""])
+    for row in sorted(generation, key=lambda r: float(r.get("final_generation_candidate_score_v6") or 0.0), reverse=True)[:20]:
+        lines.append(
+            f"- `{row.get('window_id')}` generation={row.get('final_generation_candidate_score_v6')} "
+            f"semantic={row.get('final_semantic_cowgirl_score_v6')} controller={row.get('controller_validity_score')}"
+        )
+    lines.extend(["", "## Semantically Cowgirl But Controller Invalid", ""])
+    for row in sorted(invalid, key=lambda r: float(r.get("final_semantic_cowgirl_score_v6") or 0.0), reverse=True)[:20]:
+        lines.append(
+            f"- `{row.get('window_id')}` semantic={row.get('final_semantic_cowgirl_score_v6')} "
+            f"controller=`{row.get('controller_validity_status')}` foot_outlier={row.get('foot_controller_outlier')} "
+            f"scene=`{row.get('source_scene_file')}`"
+        )
+    if not invalid:
+        lines.append("- None")
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
