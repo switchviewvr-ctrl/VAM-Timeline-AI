@@ -51,6 +51,7 @@ def audit_controller_validity(
     controller_map: str | Path,
     out_jsonl: str | Path,
     report: str | Path,
+    pose_anchor_completeness: str | Path | None = None,
 ) -> list[dict[str, Any]]:
     """Audit controller plausibility for every relative motion window.
 
@@ -61,10 +62,13 @@ def audit_controller_validity(
     run = Path(run_dir)
     samples = {r.get("sample_id"): r for r in load_jsonl(sample_index) if r.get("sample_id")}
     relative_rows = load_jsonl(relative_index)
+    anchors = {r.get("window_id"): r for r in load_jsonl(pose_anchor_completeness) if r.get("window_id")} if pose_anchor_completeness else {}
     raw_rows = []
     for row in relative_rows:
         sample = samples.get(row.get("sample_id"), {})
-        raw_rows.append(_raw_controller_metrics(row, sample, run))
+        raw = _raw_controller_metrics(row, sample, run)
+        raw["pose_anchor_completeness"] = anchors.get(row.get("window_id"), {})
+        raw_rows.append(raw)
     thresholds = _derive_thresholds(raw_rows)
     rows = [classify_controller_validity(row, thresholds) for row in raw_rows]
     write_jsonl(out_jsonl, rows)
@@ -144,8 +148,13 @@ def classify_controller_validity(raw: dict[str, Any], thresholds: dict[str, floa
     if knee_outlier:
         outlier_bodyparts.append("knee_or_leg_chain")
     controller_outlier_count = len(outlier_bodyparts)
+    anchor = raw.get("pose_anchor_completeness") or {}
+    missing_foot = bool(anchor.get("missing_foot_controllers"))
+    missing_knee = bool(anchor.get("missing_knee_controllers"))
+    anchor_incomplete = bool(anchor.get("pose_anchor_incomplete"))
     max_outlier = max(left_foot_score, right_foot_score, left_hand_score, right_hand_score, torso_score, knee_score)
-    controller_validity_score = float(np.clip(1.0 - 0.22 * controller_outlier_count - 0.45 * max_outlier, 0.0, 1.0))
+    anchor_penalty = 0.35 if missing_foot else 0.22 if missing_knee else 0.12 if anchor_incomplete else 0.0
+    controller_validity_score = float(np.clip(1.0 - 0.22 * controller_outlier_count - 0.45 * max_outlier - anchor_penalty, 0.0, 1.0))
     if controller_outlier_count == 0 and raw.get("allowed_body_controller_count", 0) >= 2:
         status = "valid"
     elif foot_outlier or torso_outlier or max_outlier >= 0.55:
@@ -154,7 +163,9 @@ def classify_controller_validity(raw: dict[str, Any], thresholds: dict[str, floa
         status = "warning"
     else:
         status = "unknown"
-    generation_valid: bool | str = status == "valid"
+    if anchor_incomplete and status == "valid":
+        status = "warning"
+    generation_valid: bool | str = status == "valid" and not anchor_incomplete and not missing_foot and not missing_knee
     export_valid: bool | str = status in {"valid", "warning"}
     warnings = list(raw.get("warnings", []))
     if foot_outlier:
@@ -165,6 +176,10 @@ def classify_controller_validity(raw: dict[str, Any], thresholds: dict[str, floa
         warnings.append("Head/torso chain outlier; inspect pose validity.")
     if status == "invalid":
         warnings.append("Controller plausibility is invalid for generation-template use.")
+    if missing_foot:
+        warnings.append("Required foot anchor controllers are missing; generation pose is unsafe.")
+    if missing_knee:
+        warnings.append("Required knee anchor controllers are missing or incomplete.")
 
     out = dict(raw)
     out.update(
@@ -184,6 +199,13 @@ def classify_controller_validity(raw: dict[str, Any], thresholds: dict[str, floa
             "leg_chain_plausibility_score": round(float(np.clip(1.0 - max(left_foot_score, right_foot_score, knee_score), 0.0, 1.0)), 6),
             "arm_chain_plausibility_score": round(float(np.clip(1.0 - max(left_hand_score, right_hand_score), 0.0, 1.0)), 6),
             "torso_chain_plausibility_score": round(float(np.clip(1.0 - torso_score, 0.0, 1.0)), 6),
+            "missing_foot_controllers": missing_foot,
+            "missing_knee_controllers": missing_knee,
+            "pose_anchor_incomplete": anchor_incomplete,
+            "pose_anchor_completeness_score": anchor.get("pose_anchor_completeness_score"),
+            "generation_pose_anchor_safe": anchor.get("generation_pose_anchor_safe"),
+            "missing_required_anchor_controllers": anchor.get("missing_required_anchor_controllers", []),
+            "pose_anchor_completeness": anchor,
             "warnings": _dedupe(warnings),
             "is_human_ground_truth": False,
             "is_training_label": False,
@@ -428,6 +450,8 @@ def _write_report(rows: list[dict[str, Any]], thresholds: dict[str, float], repo
     status_counts = Counter(r.get("controller_validity_status") for r in rows)
     foot_count = sum(1 for r in rows if r.get("foot_controller_outlier"))
     hand_count = sum(1 for r in rows if r.get("hand_controller_outlier"))
+    missing_foot = sum(1 for r in rows if r.get("missing_foot_controllers"))
+    missing_knee = sum(1 for r in rows if r.get("missing_knee_controllers"))
     invalid = [r for r in rows if r.get("controller_validity_status") == "invalid"]
     scenes = Counter(r.get("source_scene_file") for r in invalid)
     samples = Counter(r.get("sample_id") for r in invalid)
@@ -438,6 +462,8 @@ def _write_report(rows: list[dict[str, Any]], thresholds: dict[str, float], repo
         "",
         f"- Windows audited: {len(rows)}",
         f"- Foot controller outliers: {foot_count}",
+        f"- Missing foot anchors: {missing_foot}",
+        f"- Missing knee anchors: {missing_knee}",
         f"- Hand controller outliers: {hand_count}",
         "",
         "## Controller Validity Status",

@@ -48,6 +48,7 @@ def export_semantic_review_010(
     out_dir: str | Path,
     count: int = 10,
     attempt_timeline_export: bool = True,
+    export_mode: str = "motion_only",
     use_body_motion_quality: bool = False,
     prefer_clean_body_motion: bool = False,
     use_handmade_reference_matches: bool = False,
@@ -58,12 +59,14 @@ def export_semantic_review_010(
     use_cowgirl_candidate_score_v4: bool = False,
     use_cowgirl_candidate_score_v5: bool = False,
     use_cowgirl_candidate_score_v6: bool = False,
+    use_cowgirl_candidate_score_v7: bool = False,
     use_rider_receiver_discrimination: bool = False,
     use_relative_motion_features: bool = False,
     use_trajectory_shape_features: bool = False,
     use_relative_reference_matches: bool = False,
     use_pose_export_validity: bool = False,
     use_controller_validity: bool = False,
+    use_pose_anchor_completeness: bool = False,
 ) -> dict[str, Any]:
     if count != 10:
         raise ValueError("semantic review MVP expects exactly 10 items")
@@ -77,19 +80,24 @@ def export_semantic_review_010(
         "use_handmade_reference_matches": use_handmade_reference_matches,
         "prefer_longer_cowgirl_windows": prefer_longer_cowgirl_windows,
         "min_cowgirl_window_seconds": min_cowgirl_window_seconds,
+        "export_mode": export_mode,
         "use_cowgirl_candidate_score_v2": use_cowgirl_candidate_score_v2,
         "use_cowgirl_candidate_score_v3": use_cowgirl_candidate_score_v3,
         "use_cowgirl_candidate_score_v4": use_cowgirl_candidate_score_v4,
         "use_cowgirl_candidate_score_v5": use_cowgirl_candidate_score_v5,
         "use_cowgirl_candidate_score_v6": use_cowgirl_candidate_score_v6,
+        "use_cowgirl_candidate_score_v7": use_cowgirl_candidate_score_v7,
         "use_rider_receiver_discrimination": use_rider_receiver_discrimination,
         "use_relative_motion_features": use_relative_motion_features,
         "use_trajectory_shape_features": use_trajectory_shape_features,
         "use_relative_reference_matches": use_relative_reference_matches,
         "use_pose_export_validity": use_pose_export_validity,
         "use_controller_validity": use_controller_validity,
+        "use_pose_anchor_completeness": use_pose_anchor_completeness,
     }
-    if use_cowgirl_candidate_score_v6 or use_controller_validity:
+    if use_cowgirl_candidate_score_v7 or use_pose_anchor_completeness:
+        selected = _select_10_v9(data)
+    elif use_cowgirl_candidate_score_v6 or use_controller_validity:
         selected = _select_10_v8(data)
     elif use_cowgirl_candidate_score_v5 or use_pose_export_validity:
         selected = _select_10_v7(data)
@@ -108,7 +116,7 @@ def export_semantic_review_010(
     for idx, item in enumerate(selected, start=1):
         row = _make_review_row(idx, item, data)
         if attempt_timeline_export:
-            export_result = _attempt_timeline_export(row, data, timeline_root / row["review_id"])
+            export_result = _attempt_timeline_export(row, data, timeline_root / row["review_id"], export_mode=export_mode)
         else:
             export_result = _write_export_unavailable(timeline_root / row["review_id"], row, "timeline export disabled by command")
         row["has_timeline_export"] = bool(export_result.get("success"))
@@ -207,6 +215,8 @@ def _load_data(run: Path) -> dict[str, Any]:
         "cowgirl_scores_v5": {r.get("window_id"): r for r in load_jsonl(run / "audits" / "cowgirl_candidate_scores_v5.jsonl") if r.get("window_id")},
         "controller_validity": {r.get("window_id"): r for r in load_jsonl(run / "audits" / "controller_validity.jsonl") if r.get("window_id")},
         "cowgirl_scores_v6": {r.get("window_id"): r for r in load_jsonl(run / "audits" / "cowgirl_candidate_scores_v6.jsonl") if r.get("window_id")},
+        "pose_anchor_completeness": {r.get("window_id"): r for r in load_jsonl(run / "audits" / "pose_anchor_completeness.jsonl") if r.get("window_id")},
+        "cowgirl_scores_v7": {r.get("window_id"): r for r in load_jsonl(run / "audits" / "cowgirl_candidate_scores_v7.jsonl") if r.get("window_id")},
     }
 
 
@@ -789,6 +799,114 @@ def _select_10_v8(data: dict[str, Any]) -> list[dict[str, Any]]:
     return selected
 
 
+def _select_10_v9(data: dict[str, Any]) -> list[dict[str, Any]]:
+    flags = data.get("selection_flags", {})
+    min_duration = float(flags.get("min_cowgirl_window_seconds") or 4.0)
+    quotas = {
+        "semantic_cowgirl_generation_safe": 3,
+        "semantic_cowgirl_anchor_incomplete": 2,
+        "semantic_cowgirl_controller_outlier": 1,
+        "cowgirl_context_intro_low_motion": 1,
+        "receiver_response_negative": 1,
+        "unknown_or_unusable": 1,
+        "export_unavailable_or_missing_anchor": 1,
+    }
+    pools = {key: [] for key in quotas}
+    for wid, score in data["cowgirl_scores_v7"].items():
+        duration = float(score.get("duration_seconds") or 0.0)
+        if score.get("semantic_cowgirl_generation_safe") and duration >= min_duration:
+            pools["semantic_cowgirl_generation_safe"].append(
+                _candidate(
+                    "semantic_cowgirl_generation_safe",
+                    wid,
+                    _pair_id_from_role_score(data["rider_receiver_scores"].get(wid, {})),
+                    float(score.get("final_generation_candidate_score_v7") or 0.0),
+                    ["semantic Cowgirl and pose-anchor complete for review/generation candidate"],
+                    ["semantic_cowgirl_generation_safe", "pose_anchor_controllers_present"],
+                )
+            )
+        if score.get("semantic_cowgirl_anchor_incomplete"):
+            pools["semantic_cowgirl_anchor_incomplete"].append(
+                _candidate(
+                    "semantic_cowgirl_anchor_incomplete",
+                    wid,
+                    _pair_id_from_role_score(data["rider_receiver_scores"].get(wid, {})),
+                    float(score.get("final_semantic_cowgirl_score_v7") or 0.0),
+                    ["semantic Cowgirl but missing pose-critical static anchors"],
+                    ["pose_anchor_incomplete", *(score.get("missing_required_anchor_controllers") or [])],
+                )
+            )
+        if score.get("semantic_cowgirl_controller_outlier"):
+            pools["semantic_cowgirl_controller_outlier"].append(
+                _candidate(
+                    "semantic_cowgirl_controller_outlier",
+                    wid,
+                    _pair_id_from_role_score(data["rider_receiver_scores"].get(wid, {})),
+                    float(score.get("final_semantic_cowgirl_score_v7") or 0.0),
+                    ["semantic Cowgirl but controller outlier makes generation unsafe"],
+                    ["controller_outlier", "generation_pose_invalid"],
+                )
+            )
+        if score.get("cowgirl_context_intro_low_motion"):
+            pools["cowgirl_context_intro_low_motion"].append(
+                _candidate(
+                    "cowgirl_context_intro_low_motion",
+                    wid,
+                    None,
+                    float(score.get("cowgirl_context_score") or 0.0),
+                    ["Cowgirl context/intro or low-motion pose; not clean motion"],
+                    ["cowgirl_context_intro_low_motion"],
+                )
+            )
+        if score.get("receiver_response_negative"):
+            pools["receiver_response_negative"].append(
+                _candidate(
+                    "receiver_response_negative",
+                    wid,
+                    _pair_id_from_role_score(data["rider_receiver_scores"].get(wid, {})),
+                    float(score.get("receiver_body_response_score") or 0.0),
+                    ["receiver/body-response negative retained for audit"],
+                    ["receiver_body_response", "not_active_rider"],
+                )
+            )
+        if score.get("unknown_or_unusable"):
+            pools["unknown_or_unusable"].append(
+                _candidate(
+                    "unknown_or_unusable",
+                    wid,
+                    None,
+                    max(float(score.get("final_semantic_cowgirl_score_v7") or 0.0), 0.25),
+                    ["unknown/unusable or export unavailable case"],
+                    ["unknown_or_unusable"],
+                )
+            )
+        if score.get("export_unavailable_for_generation") or score.get("missing_foot_controllers") or score.get("missing_knee_controllers"):
+            pools["export_unavailable_or_missing_anchor"].append(
+                _candidate(
+                    "export_unavailable_or_missing_anchor",
+                    wid,
+                    None,
+                    max(float(score.get("final_semantic_cowgirl_score_v7") or 0.0), float(score.get("pose_anchor_completeness_score") or 0.0)),
+                    ["export unavailable or missing required pose anchors"],
+                    ["export_unavailable_or_missing_anchor"],
+                )
+            )
+    for rows in pools.values():
+        _enrich_candidates(rows, data)
+        rows.sort(key=lambda r: float(r.get("score") or 0.0), reverse=True)
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    per_scene: Counter[str] = Counter()
+    per_sample: Counter[str] = Counter()
+    for category, quota in quotas.items():
+        _take(pools[category], quota, selected, seen, per_scene, per_sample, strict=True)
+    if len(selected) < 10:
+        _take([c for rows in pools.values() for c in rows], 10 - len(selected), selected, seen, per_scene, per_sample, strict=False)
+    if len(selected) != 10:
+        raise ValueError(f"Could not select exactly 10 examples; selected {len(selected)}")
+    return selected
+
+
 def _positive_candidates(data: dict[str, Any]) -> list[dict[str, Any]]:
     out = []
     wanted = {"cowgirl_vertical_bounce", "cowgirl_forward_back_rock", "cowgirl_circular_grind"}
@@ -940,10 +1058,12 @@ def _make_review_row(idx: int, item: dict[str, Any], data: dict[str, Any]) -> di
     cowgirl_score_v5 = data["cowgirl_scores_v5"].get(wid, {})
     controller_validity = data["controller_validity"].get(wid, {})
     cowgirl_score_v6 = data["cowgirl_scores_v6"].get(wid, {})
+    pose_anchor = data["pose_anchor_completeness"].get(wid, {})
+    cowgirl_score_v7 = data["cowgirl_scores_v7"].get(wid, {})
     phase = classify_motion_phase(frow, body_quality)
     guard = evaluate_domain_guards(frow, body_quality)
     review_id = f"review_{idx:03d}"
-    guess = _semantic_guess(item, frow, window_scores, pair_feature, pair_scores, silver_window, silver_pair, body_quality, phase, guard, reference_match, rider_receiver, cowgirl_score_v3, relative_feature, trajectory_feature, relative_match, cowgirl_score_v4, pose_export, cowgirl_score_v5, controller_validity, cowgirl_score_v6)
+    guess = _semantic_guess(item, frow, window_scores, pair_feature, pair_scores, silver_window, silver_pair, body_quality, phase, guard, reference_match, rider_receiver, cowgirl_score_v3, relative_feature, trajectory_feature, relative_match, cowgirl_score_v4, pose_export, cowgirl_score_v5, controller_validity, cowgirl_score_v6, pose_anchor, cowgirl_score_v7)
     pair_actor = _pair_actor(wid, pair)
     return {
         "review_id": review_id,
@@ -987,12 +1107,14 @@ def _make_review_row(idx: int, item: dict[str, Any], data: dict[str, Any]) -> di
             "clean_cowgirl_candidate_score_v5": cowgirl_score_v5,
             "controller_validity": controller_validity,
             "clean_cowgirl_candidate_score_v6": cowgirl_score_v6,
+            "pose_anchor_completeness": pose_anchor,
+            "clean_cowgirl_candidate_score_v7": cowgirl_score_v7,
         },
         "why_selected": item["why_selected"],
         "user_questions": _questions_for_item(bool(pair)),
         "answer_options": ["correct", "wrong", "unclear"],
         "is_human_ground_truth": False,
-        "export_context_padding_seconds": 0.5 if (data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v2") or data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v3") or data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v4") or data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v5") or data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v6")) else 0.0,
+        "export_context_padding_seconds": 0.5 if (data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v2") or data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v3") or data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v4") or data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v5") or data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v6") or data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v7")) else 0.0,
     }
 
 
@@ -1018,6 +1140,8 @@ def _semantic_guess(
     cowgirl_score_v5: dict[str, Any] | None = None,
     controller_validity: dict[str, Any] | None = None,
     cowgirl_score_v6: dict[str, Any] | None = None,
+    pose_anchor: dict[str, Any] | None = None,
+    cowgirl_score_v7: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     score_labels = [str(r.get("label")) for r in sorted(scores, key=lambda r: float(r.get("final_score") or 0.0), reverse=True)]
     silver_labels = list(silver_window.get("positive_labels", []) or [])
@@ -1054,6 +1178,8 @@ def _semantic_guess(
     cowgirl_score_v5 = cowgirl_score_v5 or {}
     controller_validity = controller_validity or {}
     cowgirl_score_v6 = cowgirl_score_v6 or {}
+    pose_anchor = pose_anchor or {}
+    cowgirl_score_v7 = cowgirl_score_v7 or {}
     multiplier = float(guard.get("cowgirl_confidence_multiplier") or 1.0)
     if body_quality.get("body_motion_quality") in {"controller_only_whole_person_motion", "root_only_motion"}:
         active_candidate = "unsafe/root-motion only; not valid rider output"
@@ -1087,6 +1213,8 @@ def _semantic_guess(
         movement_labels = _dedupe(["cowgirl_intro_or_start_pose", "not_clean_motion", *movement_labels])[:4]
     if cowgirl_score_v6.get("foot_controller_outlier"):
         movement_labels = _dedupe([*movement_labels, "foot_controller_outlier"])[:5]
+    if cowgirl_score_v7.get("missing_foot_controllers"):
+        movement_labels = _dedupe([*movement_labels, "missing_foot_controllers"])[:5]
     if role_status == "likely_active_rider":
         active_candidate = "likely yes (motion/pair evidence)"
         passive_candidate = "unlikely"
@@ -1133,6 +1261,16 @@ def _semantic_guess(
         "generation_candidate_score_v5": cowgirl_score_v5.get("final_generation_candidate_score_v5"),
         "semantic_cowgirl_score_v6": cowgirl_score_v6.get("final_semantic_cowgirl_score_v6"),
         "generation_candidate_score_v6": cowgirl_score_v6.get("final_generation_candidate_score_v6"),
+        "semantic_cowgirl_score_v7": cowgirl_score_v7.get("final_semantic_cowgirl_score_v7"),
+        "generation_candidate_score_v7": cowgirl_score_v7.get("final_generation_candidate_score_v7"),
+        "clean_motion_score_v7": cowgirl_score_v7.get("final_clean_motion_score_v7"),
+        "pose_anchor_completeness_score": cowgirl_score_v7.get("pose_anchor_completeness_score") or pose_anchor.get("pose_anchor_completeness_score"),
+        "generation_pose_anchor_safe": cowgirl_score_v7.get("generation_pose_anchor_safe") if cowgirl_score_v7 else pose_anchor.get("generation_pose_anchor_safe"),
+        "missing_required_anchor_controllers": cowgirl_score_v7.get("missing_required_anchor_controllers") or pose_anchor.get("missing_required_anchor_controllers", []),
+        "foot_controllers_present": pose_anchor.get("foot_controllers_present"),
+        "knee_controllers_present": pose_anchor.get("knee_controllers_present"),
+        "missing_foot_controllers": bool(cowgirl_score_v7.get("missing_foot_controllers") or pose_anchor.get("missing_foot_controllers")),
+        "missing_knee_controllers": bool(cowgirl_score_v7.get("missing_knee_controllers") or pose_anchor.get("missing_knee_controllers")),
         "clean_motion_score": cowgirl_score_v6.get("clean_motion_score"),
         "cowgirl_context_score": cowgirl_score_v6.get("cowgirl_context_score"),
         "controller_validity_score": cowgirl_score_v6.get("controller_validity_score") or controller_validity.get("controller_validity_score"),
@@ -1141,7 +1279,7 @@ def _semantic_guess(
         "hand_controller_outlier": bool(cowgirl_score_v6.get("hand_controller_outlier") or controller_validity.get("hand_controller_outlier")),
         "controller_outlier_count": cowgirl_score_v6.get("controller_outlier_count") or controller_validity.get("controller_outlier_count"),
         "export_pose_validity": cowgirl_score_v5.get("export_pose_validity") or pose_export.get("export_pose_validity"),
-        "generation_template_safe": bool(cowgirl_score_v6.get("generation_candidate_v6") or cowgirl_score_v5.get("generation_template_safe") or pose_export.get("generation_template_safe")),
+        "generation_template_safe": bool(cowgirl_score_v7.get("semantic_cowgirl_generation_safe") or cowgirl_score_v6.get("generation_candidate_v6") or cowgirl_score_v5.get("generation_template_safe") or pose_export.get("generation_template_safe")),
         "semantically_good_but_not_generation_safe": bool(cowgirl_score_v5.get("semantically_good_but_not_generation_safe")),
         "semantically_cowgirl_but_controller_invalid": bool(cowgirl_score_v6.get("semantically_cowgirl_but_controller_invalid")),
         "low_motion_intro_candidate": bool(cowgirl_score_v5.get("cowgirl_context_low_motion_intro") or pose_export.get("low_motion_intro_candidate")),
@@ -1158,7 +1296,7 @@ def _semantic_guess(
     }
 
 
-def _attempt_timeline_export(row: dict[str, Any], data: dict[str, Any], out_dir: Path) -> dict[str, Any]:
+def _attempt_timeline_export(row: dict[str, Any], data: dict[str, Any], out_dir: Path, export_mode: str = "motion_only") -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     sample = data["samples"].get(row.get("sample_id"))
     if not sample:
@@ -1172,7 +1310,7 @@ def _attempt_timeline_export(row: dict[str, Any], data: dict[str, Any], out_dir:
     if loaded is None:
         return _write_export_unavailable(out_dir, row, "baked NPZ missing or unreadable")
     positions, rotations, names, times, export_start, export_end = loaded
-    positions, rotations, names, safety = _filter_safe_export_controllers(positions, rotations, names)
+    positions, rotations, names, safety = _filter_safe_export_controllers(positions, rotations, names, export_mode=export_mode)
     if not names:
         return _write_export_unavailable(out_dir, row, "no allowed bodypart controller tracks remain after stripping Person/root/world tracks")
     if positions.size == 0 or rotations.size == 0:
@@ -1209,12 +1347,19 @@ def _attempt_timeline_export(row: dict[str, Any], data: dict[str, Any], out_dir:
         "exported_with_context_end_seconds": export_end,
         "exported_duration_seconds": duration,
         "controller_names": names,
+        "export_mode": export_mode,
         "export_format": "AcidBubbles Timeline-style JSON, dense linear keys",
         "coordinate_space_assumption": "Original Timeline controller-space/control-space for the same source scene and atom; not retargeted.",
         "source_world_coords_stripped": safety["source_world_coords_stripped"],
+        "static_anchor_tracks_included": safety["static_anchor_tracks_included"],
+        "static_anchor_controller_names": safety["static_anchor_controller_names"],
+        "missing_required_anchor_controllers": row.get("system_semantic_guess", {}).get("missing_required_anchor_controllers", []),
+        "pose_anchor_completeness_score": row.get("system_semantic_guess", {}).get("pose_anchor_completeness_score"),
+        "generation_pose_anchor_safe": row.get("system_semantic_guess", {}).get("generation_pose_anchor_safe"),
         "exported_as_relative_motion": safety["exported_as_relative_motion"],
         "uses_absolute_review_coordinates": True,
         "review_export_safe_to_inspect": safety["safe_for_import"],
+        "safe_for_import_review": safety["safe_for_import_review"],
         "safe_for_import": safety["safe_for_import"],
         "safe_for_learning": bool(row.get("system_semantic_guess", {}).get("safe_for_learning")),
         "generation_template_safe": False,
@@ -1254,7 +1399,7 @@ def _attempt_timeline_export(row: dict[str, Any], data: dict[str, Any], out_dir:
     }
 
 
-def _filter_safe_export_controllers(positions: np.ndarray, rotations: np.ndarray, names: list[str]) -> tuple[np.ndarray, np.ndarray, list[str], dict[str, Any]]:
+def _filter_safe_export_controllers(positions: np.ndarray, rotations: np.ndarray, names: list[str], export_mode: str = "motion_only") -> tuple[np.ndarray, np.ndarray, list[str], dict[str, Any]]:
     safe_indices: list[int] = []
     stripped_root = 0
     stripped_world = 0
@@ -1274,6 +1419,7 @@ def _filter_safe_export_controllers(positions: np.ndarray, rotations: np.ndarray
         safe_positions = positions[:, :0, :]
         safe_rotations = rotations[:, :0, :]
     moving = 0
+    anchor_names = [name for name in safe_names if _is_pose_anchor_controller(name)]
     if safe_positions.size:
         ranges = np.nanmax(safe_positions, axis=0) - np.nanmin(safe_positions, axis=0)
         moving = int(np.sum(np.linalg.norm(ranges, axis=1) > 1e-5))
@@ -1283,17 +1429,26 @@ def _filter_safe_export_controllers(positions: np.ndarray, rotations: np.ndarray
         "stripped_world_transform_count": stripped_world,
         "stripped_atom_root_count": stripped_root,
         "coordinate_space_assumption": "Allowed bodypart controller tracks only; Person/root/world tracks stripped.",
+        "export_mode": export_mode,
+        "static_anchor_tracks_included": export_mode in {"motion_plus_static_anchors", "generation_template_candidate"} and bool(anchor_names),
+        "static_anchor_controller_names": anchor_names if export_mode in {"motion_plus_static_anchors", "generation_template_candidate"} else [],
         "teleport_risk": teleport_risk,
         "export_safe_for_import": bool(safe_names) and teleport_risk in {"low", "medium"},
         "safe_for_import": bool(safe_names) and teleport_risk in {"low", "medium"},
+        "safe_for_import_review": "conditional" if bool(safe_names) and teleport_risk in {"low", "medium"} else False,
         "timeline_export_safe_for_animation": bool(safe_names) and moving >= 1,
         "source_world_coords_stripped": bool(stripped_root or stripped_world),
         "exported_as_relative_motion": False,
         "safe_for_generation_template": False,
-        "review_export_warning": "This export is for VaM review only. It preserves source controller coordinates and is not a generative reuse template.",
+        "review_export_warning": "This export is for VaM review only. It preserves source controller coordinates and is not a generative reuse template. Static anchors are included when available in motion_plus_static_anchors mode.",
         "stripped_controller_names": [name for idx, name in enumerate(names) if idx not in safe_indices],
     }
     return safe_positions, safe_rotations, safe_names, safety
+
+
+def _is_pose_anchor_controller(name: str) -> bool:
+    text = str(name).lower()
+    return any(token in text for token in ["footcontrol", "kneecontrol", "thighcontrol", "hipcontrol", "pelviscontrol", "chestcontrol", "abdomencontrol"])
 
 
 def _generation_template_block_reasons(row: dict[str, Any], safety: dict[str, Any]) -> list[str]:
@@ -1318,6 +1473,12 @@ def _generation_template_block_reasons(row: dict[str, Any], safety: dict[str, An
         reasons.append("hand_controller_outlier")
     if guess.get("controller_validity_status") in {"invalid", "unknown"}:
         reasons.append(f"controller_validity_{guess.get('controller_validity_status')}")
+    if guess.get("missing_foot_controllers"):
+        reasons.append("missing_foot_controllers")
+    if guess.get("missing_knee_controllers"):
+        reasons.append("missing_knee_controllers")
+    if guess.get("generation_pose_anchor_safe") is False:
+        reasons.append("pose_anchor_incomplete")
     return _dedupe(reasons)
 
 
@@ -1650,6 +1811,11 @@ def _write_index_html(rows: list[dict[str, Any]], out: Path) -> None:
             f"<li>Generation candidate score v5: {html.escape(str(guess.get('generation_candidate_score_v5')))}</li>"
             f"<li>Semantic Cowgirl score v6: {html.escape(str(guess.get('semantic_cowgirl_score_v6')))}</li>"
             f"<li>Generation candidate score v6: {html.escape(str(guess.get('generation_candidate_score_v6')))}</li>"
+            f"<li>Semantic Cowgirl score v7: {html.escape(str(guess.get('semantic_cowgirl_score_v7')))}</li>"
+            f"<li>Generation candidate score v7: {html.escape(str(guess.get('generation_candidate_score_v7')))}</li>"
+            f"<li>Pose anchors: score={html.escape(str(guess.get('pose_anchor_completeness_score')))}, "
+            f"foot_present={html.escape(str(guess.get('foot_controllers_present')))}, knee_present={html.escape(str(guess.get('knee_controllers_present')))}, "
+            f"missing={html.escape(str(guess.get('missing_required_anchor_controllers')))}</li>"
             f"<li>Controller validity: {html.escape(str(guess.get('controller_validity_status')))} "
             f"(score={html.escape(str(guess.get('controller_validity_score')))}, foot_outlier={html.escape(str(guess.get('foot_controller_outlier')))}, hand_outlier={html.escape(str(guess.get('hand_controller_outlier')))})</li>"
             f"<li>Clean motion score: {html.escape(str(guess.get('clean_motion_score')))}; Cowgirl context score: {html.escape(str(guess.get('cowgirl_context_score')))}</li>"

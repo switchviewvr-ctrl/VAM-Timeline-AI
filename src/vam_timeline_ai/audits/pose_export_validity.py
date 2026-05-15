@@ -34,6 +34,7 @@ def audit_pose_export_validity(
     out_jsonl: str | Path,
     report: str | Path,
     controller_validity: str | Path | None = None,
+    pose_anchor_completeness: str | Path | None = None,
 ) -> list[dict[str, Any]]:
     review_path = Path(review_dir)
     review_rows = load_jsonl(review_path / "semantic_review_010.jsonl")
@@ -42,6 +43,7 @@ def audit_pose_export_validity(
     relative = {r.get("window_id"): r for r in load_jsonl(relative_index) if r.get("window_id")}
     body = {r.get("window_id"): r for r in load_jsonl(body_quality) if r.get("window_id")}
     controller = {r.get("window_id"): r for r in load_jsonl(controller_validity) if r.get("window_id")} if controller_validity else {}
+    anchors = {r.get("window_id"): r for r in load_jsonl(pose_anchor_completeness) if r.get("window_id")} if pose_anchor_completeness else {}
     rows = [
         pose_export_validity_for_review_item(
             row,
@@ -50,6 +52,7 @@ def audit_pose_export_validity(
             relative.get(row.get("window_id"), {}),
             body.get(row.get("window_id"), {}),
             controller.get(row.get("window_id"), {}),
+            anchors.get(row.get("window_id"), {}),
         )
         for row in review_rows
     ]
@@ -65,12 +68,14 @@ def pose_export_validity_for_review_item(
     relative: dict[str, Any] | None,
     body: dict[str, Any] | None,
     controller: dict[str, Any] | None = None,
+    anchors: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     answer = answer or {}
     sample = sample or {}
     relative = relative or {}
     body = body or {}
     controller = controller or {}
+    anchors = anchors or {}
     labels = {str(x) for x in (answer.get("actual_labels") or [])}
     verdict = str(answer.get("user_verdict") or "unknown")
     has_export = bool(review_row.get("has_timeline_export"))
@@ -111,6 +116,9 @@ def pose_export_validity_for_review_item(
     controller_status = str(controller.get("controller_validity_status") or "unknown")
     foot_outlier = bool(controller.get("foot_controller_outlier") or "foot_controller_outlier" in labels)
     hand_outlier = bool(controller.get("hand_controller_outlier") or "hand_controller_outlier" in labels)
+    missing_foot = bool(controller.get("missing_foot_controllers") or anchors.get("missing_foot_controllers") or "missing_foot_controllers" in labels)
+    missing_knee = bool(controller.get("missing_knee_controllers") or anchors.get("missing_knee_controllers") or "missing_knee_controllers" in labels)
+    anchor_incomplete = bool(controller.get("pose_anchor_incomplete") or anchors.get("pose_anchor_incomplete") or missing_foot or missing_knee)
     controller_outlier_count = int(controller.get("controller_outlier_count") or 0)
     if foot_outlier and not controller.get("foot_controller_outlier"):
         controller_outlier_count += 1
@@ -118,7 +126,7 @@ def pose_export_validity_for_review_item(
         controller_outlier_count += 1
     controller_generation_ok = True
     if controller:
-        controller_generation_ok = controller.get("generation_pose_valid") is True and controller_status == "valid" and not foot_outlier
+        controller_generation_ok = controller.get("generation_pose_valid") is True and controller_status == "valid" and not foot_outlier and not anchor_incomplete
     generation_safe = bool(
         not export_unavailable
         and not broken
@@ -137,6 +145,10 @@ def pose_export_validity_for_review_item(
         warnings.append("Foot controller outlier blocks generation-template use but does not automatically make semantics wrong.")
     if hand_outlier:
         warnings.append("Hand controller outlier requires pose/controller inspection.")
+    if missing_foot:
+        warnings.append("Missing foot anchors block generation-template use; static feet still matter.")
+    if missing_knee:
+        warnings.append("Missing knee anchors make lower-body pose incomplete.")
     if export_unavailable:
         warnings.append("Export unavailable is not counted as semantic wrong.")
     if low_motion_intro:
@@ -152,6 +164,12 @@ def pose_export_validity_for_review_item(
         invalid_reasons.append("foot_controller_outlier")
     if hand_outlier:
         invalid_reasons.append("hand_controller_outlier")
+    if missing_foot:
+        invalid_reasons.append("missing_foot_controllers")
+    if missing_knee:
+        invalid_reasons.append("missing_knee_controllers")
+    if anchor_incomplete:
+        invalid_reasons.append("pose_anchor_incomplete")
     if controller_status == "invalid":
         invalid_reasons.append("controller_validity_invalid")
     if export_unavailable:
@@ -183,10 +201,17 @@ def pose_export_validity_for_review_item(
         "controller_validity_score": controller.get("controller_validity_score"),
         "foot_controller_outlier": foot_outlier,
         "hand_controller_outlier": hand_outlier,
+        "missing_foot_controllers": missing_foot,
+        "missing_knee_controllers": missing_knee,
+        "pose_anchor_incomplete": anchor_incomplete,
+        "pose_anchor_completeness_score": anchors.get("pose_anchor_completeness_score") or controller.get("pose_anchor_completeness_score"),
+        "generation_pose_anchor_safe": anchors.get("generation_pose_anchor_safe") if anchors else controller.get("generation_pose_anchor_safe"),
+        "missing_required_anchor_controllers": anchors.get("missing_required_anchor_controllers") or controller.get("missing_required_anchor_controllers", []),
         "controller_outlier_count": controller_outlier_count,
         "generation_pose_invalid_reason": invalid_reasons,
         "export_pose_valid_reason": export_valid_reason,
         "controller_validity": controller,
+        "pose_anchor_completeness": anchors,
         "low_motion_intro_candidate": low_motion_intro,
         "too_short_for_semantic_judgment": too_short,
         "review_export_available": has_export,

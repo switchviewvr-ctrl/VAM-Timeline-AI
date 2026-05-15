@@ -5,13 +5,15 @@ import numpy as np
 from vam_timeline_ai.audits.semantic_review import export_semantic_review_010
 from vam_timeline_ai.audits.pose_export_validity import pose_export_validity_for_review_item
 from vam_timeline_ai.audits.controller_validity import controller_validity_for_arrays
+from vam_timeline_ai.audits.pose_anchor_completeness import pose_anchor_completeness_for_parts
+from vam_timeline_ai.audits.semantic_review import _filter_safe_export_controllers
 from vam_timeline_ai.features.relative_features import relative_features_from_arrays
 from vam_timeline_ai.features.trajectory_shape import trajectory_shape_for_points
 from vam_timeline_ai.io.json_utils import load_jsonl, write_jsonl
 from vam_timeline_ai.motion.coordinate_spaces import can_use_for_final_export, is_allowed_body_controller_track, is_disallowed_world_or_root_track
 from vam_timeline_ai.motion.relative_motion import build_relative_motion_window_row
 from vam_timeline_ai.references.relative_matcher import compare_relative_wild_to_handmade
-from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_window_v4, score_window_v5, score_window_v6
+from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_window_v4, score_window_v5, score_window_v6, score_window_v7
 
 
 def _times(n=121):
@@ -409,3 +411,126 @@ def test_semantic_review_v8_includes_controller_validity_and_excludes_foot_outli
     generation_safe = [r for r in rows if r["category"] == "generation_safe_cowgirl"]
     assert generation_safe
     assert all(not r["system_semantic_guess"]["foot_controller_outlier"] for r in generation_safe)
+
+
+def test_pose_anchor_completeness_detects_missing_foot_controllers():
+    row = pose_anchor_completeness_for_parts(["hip", "chest", "left_knee", "right_knee"])
+    assert row["missing_foot_controllers"]
+    assert row["generation_pose_anchor_status"] in {"partial", "incomplete"}
+    assert row["generation_pose_anchor_safe"] is False
+
+
+def test_pose_anchor_completeness_detects_complete_kneeling_anchors():
+    row = pose_anchor_completeness_for_parts(["hip", "chest", "left_knee", "right_knee", "left_foot", "right_foot"])
+    assert not row["missing_foot_controllers"]
+    assert row["foot_controllers_present"]
+    assert row["knee_controllers_present"]
+    assert row["generation_pose_anchor_status"] == "complete"
+
+
+def test_missing_static_foot_anchors_lower_generation_score():
+    base = _v6_score()
+    anchor = {
+        "pose_anchor_completeness_score": 0.67,
+        "generation_pose_anchor_safe": False,
+        "missing_foot_controllers": True,
+        "missing_knee_controllers": False,
+        "pose_anchor_incomplete": True,
+        "missing_required_anchor_controllers": ["left_foot", "right_foot"],
+        "foot_controllers_present": False,
+        "knee_controllers_present": True,
+    }
+    row = score_window_v7(
+        {"window_id": "win", "sample_id": "sample", "source_id": "src", "feature_values": {}},
+        {"body_motion_quality": "good_body_motion"},
+        {"cowgirl_relative_score": 0.9, "cowgirl_grind_trajectory_score": 0.85, "safe_for_learning": True},
+        {"feature_values": {"safe_for_learning": 1.0, "local_path_length": 1.0, "local_motion_energy": 1.0}, "feature_quality": {"teleport_risk": "low"}},
+        {"trajectory_shape_classification": "oval_grind", "feature_values": {"oval_path_score": 0.85, "ellipse_fit_score": 0.8, "closed_loop_ratio": 0.75, "grind_pattern_score": 0.85, "jitter_score": 0.05, "transition_path_score": 0.05}},
+        {"duration_seconds": 4.0},
+        {"rider_receiver_status": "likely_active_rider", "active_rider_score": 0.85, "receiver_body_response_score": 0.05},
+        {"export_pose_validity": "good", "generation_template_safe": True, "motion_strength_score": 0.9, "semantic_motion_likely_valid": True},
+        {"controller_validity_status": "valid", "controller_validity_score": 0.95, "generation_pose_valid": True},
+        anchor,
+    )
+    assert base["final_semantic_cowgirl_score_v6"] >= 0.5
+    assert row["final_semantic_cowgirl_score_v7"] >= 0.5
+    assert row["final_generation_candidate_score_v7"] < 0.1
+    assert row["semantic_cowgirl_anchor_incomplete"]
+
+
+def test_static_anchor_tracks_can_be_included_in_review_export():
+    positions = np.zeros((10, 4, 3), dtype=np.float32)
+    rotations = np.zeros((10, 4, 4), dtype=np.float32)
+    pos, rot, names, safety = _filter_safe_export_controllers(
+        positions,
+        rotations,
+        ["hipControl", "lFootControl", "rFootControl", "control"],
+        export_mode="motion_plus_static_anchors",
+    )
+    assert "lFootControl" in names
+    assert "rFootControl" in names
+    assert safety["static_anchor_tracks_included"]
+    assert set(safety["static_anchor_controller_names"]) >= {"hipControl", "lFootControl", "rFootControl"}
+
+
+def test_semantic_review_v9_preserves_anchor_incomplete_category(tmp_path):
+    from tests.test_semantic_review import _make_run
+
+    run = _make_run(tmp_path)
+    (run / "relative_motion").mkdir(parents=True, exist_ok=True)
+    rel_rows = []
+    traj_rows = []
+    match_rows = []
+    rider_rows = []
+    pose_rows = []
+    controller_rows = []
+    anchor_rows = []
+    score_rows = []
+    cats = ["safe", "safe", "safe", "anchor", "anchor", "outlier", "intro", "receiver", "unknown", "missing", "fallback", "fallback"]
+    for idx, cat in enumerate(cats):
+        wid = f"win_{idx:02d}"
+        missing = cat in {"anchor", "missing"}
+        outlier = cat == "outlier"
+        receiver = cat == "receiver"
+        rel_rows.append({"window_id": wid, "feature_values": {"safe_for_learning": 1.0}, "feature_quality": {"teleport_risk": "low"}})
+        traj_rows.append({"window_id": wid, "trajectory_shape_classification": "oval_grind", "feature_values": {"oval_path_score": 0.8, "ellipse_fit_score": 0.8, "closed_loop_ratio": 0.7, "grind_pattern_score": 0.8, "transition_path_score": 0.1, "jitter_score": 0.1}})
+        match_rows.append({"window_id": wid, "cowgirl_relative_score": 0.85, "cowgirl_grind_trajectory_score": 0.8, "safe_for_learning": True})
+        rider_rows.append({"window_id": wid, "rider_receiver_status": "likely_receiver_body_response" if receiver else "likely_active_rider", "active_rider_score": 0.8, "receiver_body_response_score": 0.8 if receiver else 0.05})
+        pose_rows.append({"window_id": wid, "export_pose_validity": "export_unavailable" if cat == "unknown" else "good", "generation_template_safe": cat == "safe", "motion_strength_score": 0.9, "semantic_motion_likely_valid": not receiver})
+        controller_rows.append({"window_id": wid, "controller_validity_status": "invalid" if outlier else "valid", "controller_validity_score": 0.1 if outlier else 0.95, "generation_pose_valid": not outlier, "foot_controller_outlier": outlier, "missing_foot_controllers": missing})
+        anchor_rows.append({"window_id": wid, "pose_anchor_completeness_score": 0.65 if missing else 1.0, "generation_pose_anchor_safe": not missing, "missing_foot_controllers": missing, "missing_knee_controllers": False, "pose_anchor_incomplete": missing, "missing_required_anchor_controllers": ["left_foot", "right_foot"] if missing else [], "foot_controllers_present": not missing, "knee_controllers_present": True})
+        score_rows.append({
+            "window_id": wid,
+            "duration_seconds": 4.0,
+            "semantic_cowgirl_candidate_v7": cat in {"safe", "anchor", "outlier", "intro", "missing"},
+            "semantic_cowgirl_generation_safe": cat == "safe",
+            "semantic_cowgirl_anchor_incomplete": cat in {"anchor", "missing"},
+            "semantic_cowgirl_controller_outlier": outlier,
+            "cowgirl_context_intro_low_motion": cat == "intro",
+            "receiver_response_negative": receiver,
+            "unknown_or_unusable": cat == "unknown",
+            "export_unavailable_for_generation": cat == "unknown",
+            "final_semantic_cowgirl_score_v7": 0.9 - idx * 0.02,
+            "final_generation_candidate_score_v7": 0.8 if cat == "safe" else 0.0,
+            "pose_anchor_completeness_score": 0.65 if missing else 1.0,
+            "missing_foot_controllers": missing,
+            "missing_knee_controllers": False,
+            "missing_required_anchor_controllers": ["left_foot", "right_foot"] if missing else [],
+            "foot_controllers_present": not missing,
+            "knee_controllers_present": True,
+        })
+    write_jsonl(run / "relative_motion" / "relative_motion_features.jsonl", rel_rows)
+    write_jsonl(run / "relative_motion" / "trajectory_shape_features.jsonl", traj_rows)
+    write_jsonl(run / "relative_motion" / "relative_reference_matches.jsonl", match_rows)
+    write_jsonl(run / "audits" / "rider_receiver_scores_v1.jsonl", rider_rows)
+    write_jsonl(run / "audits" / "pose_export_validity.jsonl", pose_rows)
+    write_jsonl(run / "audits" / "controller_validity.jsonl", controller_rows)
+    write_jsonl(run / "audits" / "pose_anchor_completeness.jsonl", anchor_rows)
+    write_jsonl(run / "audits" / "cowgirl_candidate_scores_v7.jsonl", score_rows)
+    out = run / "audits" / "semantic_review_010_v9"
+    export_semantic_review_010(run, out, count=10, attempt_timeline_export=False, export_mode="motion_plus_static_anchors", use_cowgirl_candidate_score_v7=True, use_pose_anchor_completeness=True, use_controller_validity=True)
+    rows = load_jsonl(out / "semantic_review_010.jsonl")
+    categories = {r["category"] for r in rows}
+    assert "semantic_cowgirl_anchor_incomplete" in categories
+    assert "semantic_cowgirl_generation_safe" in categories
+    assert all("pose_anchor_completeness" in r["evidence"] for r in rows)
