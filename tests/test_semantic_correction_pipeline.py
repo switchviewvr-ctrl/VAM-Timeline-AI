@@ -9,9 +9,10 @@ from vam_timeline_ai.references.handmade_import import parse_reference_filename
 from vam_timeline_ai.references.handmade_parser import classify_timeline_target
 from vam_timeline_ai.references.reference_matcher import compare_wild_to_handmade_references
 from vam_timeline_ai.semantics.domain_guards import evaluate_domain_guards
-from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_window
+from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_window, score_window_v3
 from vam_timeline_ai.semantics.machine_label_proposals import _window_proposals
 from vam_timeline_ai.semantics.motion_phase_classifier import classify_motion_phase
+from vam_timeline_ai.semantics.rider_receiver_discrimination import score_window_role
 
 
 def test_body_motion_quality_detects_root_only_synthetic_sample():
@@ -143,3 +144,90 @@ def test_clean_cowgirl_scoring_rejects_static_micro_and_prefers_longer_windows()
     assert long["duration_score"] > short["duration_score"]
     assert "too_short_for_semantic_judgment" in short["reject_reasons"]
     assert long["clean_cowgirl_candidate"] is True
+
+
+def test_rider_receiver_scoring_identifies_active_rider_vs_receiver_response():
+    active_feature = {
+        "window_id": "active",
+        "feature_values": {
+            "pelvis_total_position_range": 0.22,
+            "pelvis_movement_energy": 0.08,
+            "torso_motion_energy": 0.04,
+            "left_hand_motion_energy": 0.03,
+            "right_hand_motion_energy": 0.02,
+            "knee_motion_energy_left": 0.02,
+            "steady_rhythm_score_proxy": 0.8,
+        },
+    }
+    active_body = {"body_motion_quality": "good_body_motion", "active_bodypart_count_above_threshold": 4, "moving_bodypart_count": 4}
+    active = score_window_role(active_feature, active_body, {"cowgirl_reference_score": 0.75}, [{"active_support": 0.95, "receiver_support": 0.0, "passive_support": 0.0, "below_other_score": 0.0, "other_active_confidence": 0.0}])
+    assert active["rider_receiver_status"] == "likely_active_rider"
+
+    receiver_feature = {
+        "window_id": "receiver",
+        "feature_values": {
+            "pelvis_total_position_range": 0.16,
+            "pelvis_movement_energy": 0.04,
+            "torso_motion_energy": 0.0,
+            "left_hand_motion_energy": 0.0,
+            "right_hand_motion_energy": 0.0,
+            "knee_motion_energy_left": 0.0,
+        },
+    }
+    receiver_body = {"body_motion_quality": "partial_body_motion", "active_bodypart_count_above_threshold": 1, "moving_bodypart_count": 1}
+    receiver = score_window_role(receiver_feature, receiver_body, {"cowgirl_reference_score": 0.6}, [{"active_support": 0.0, "receiver_support": 0.9, "passive_support": 0.7, "below_other_score": 1.0, "other_active_confidence": 0.9}])
+    assert receiver["rider_receiver_status"] == "likely_receiver_body_response"
+    assert receiver["receiver_body_response_score"] > receiver["active_rider_score"]
+
+
+def test_hip_only_motion_is_not_enough_for_active_rider_without_pair_context():
+    feature = {"window_id": "hip", "feature_values": {"pelvis_total_position_range": 0.25, "pelvis_movement_energy": 0.08}}
+    body = {"body_motion_quality": "partial_body_motion", "active_bodypart_count_above_threshold": 1, "moving_bodypart_count": 1}
+    result = score_window_role(feature, body, {"cowgirl_reference_score": 0.7}, [])
+    assert result["rider_receiver_status"] == "insufficient_pair_context"
+    assert result["active_rider_score"] < 0.5
+    assert any("No pair context" in warning for warning in result["warnings"])
+
+
+def test_cowgirl_candidate_v3_penalizes_receiver_body_response():
+    feature = {
+        "window_id": "w",
+        "feature_values": {
+            "pelvis_total_position_range": 0.2,
+            "pelvis_movement_energy": 0.08,
+            "pelvis_circularity_score_proxy": 0.8,
+            "pelvis_grind_score_proxy": 0.75,
+            "pelvis_forward_back_amplitude": 0.12,
+            "pelvis_lateral_amplitude": 0.11,
+            "pelvis_vertical_amplitude": 0.02,
+        },
+    }
+    body = {"body_motion_quality": "good_body_motion", "static_or_micro_motion": False, "micro_motion_score": 0.0, "active_bodypart_count_above_threshold": 3, "moving_bodypart_count": 3}
+    match = {"cowgirl_reference_score": 0.8, "recommended_review_status": "likely_cowgirl_candidate"}
+    rider = {"rider_receiver_status": "likely_receiver_body_response", "active_rider_score": 0.2, "receiver_body_response_score": 0.9}
+    scored = score_window_v3(feature, body, match, {"duration_seconds": 8.0}, rider)
+    assert scored["clean_cowgirl_rider_candidate_v3"] is False
+    assert scored["likely_receiver_false_positive"] is True
+    assert "likely_receiver_body_response" in scored["reject_reasons"]
+
+
+def test_grinding_subtype_is_valid_cowgirl_subtype():
+    feature = {
+        "window_id": "grind",
+        "feature_values": {
+            "pelvis_total_position_range": 0.2,
+            "pelvis_movement_energy": 0.08,
+            "pelvis_circularity_score_proxy": 0.9,
+            "pelvis_grind_score_proxy": 0.85,
+            "pelvis_forward_back_amplitude": 0.12,
+            "pelvis_lateral_amplitude": 0.11,
+            "pelvis_vertical_amplitude": 0.01,
+            "steady_rhythm_score_proxy": 0.75,
+        },
+    }
+    body = {"body_motion_quality": "good_body_motion", "static_or_micro_motion": False, "micro_motion_score": 0.0, "active_bodypart_count_above_threshold": 3, "moving_bodypart_count": 3}
+    match = {"cowgirl_reference_score": 0.8, "recommended_review_status": "likely_cowgirl_candidate"}
+    rider = {"rider_receiver_status": "likely_active_rider", "active_rider_score": 0.85, "receiver_body_response_score": 0.05}
+    scored = score_window_v3(feature, body, match, {"duration_seconds": 8.0}, rider)
+    assert scored["likely_grinding_subtype"] is True
+    assert scored["clean_cowgirl_rider_candidate_v3"] is True

@@ -193,3 +193,94 @@ def test_semantic_review_does_not_create_manual_labels_or_infer_from_atom_names(
     assert not (run / "labels" / "manual_labels.yaml").exists()
     assert all(r["is_human_ground_truth"] is False for r in rows)
     assert not any(r.get("semantic_role") in {"rider", "receiver"} for r in rows)
+
+
+def test_semantic_review_v5_likely_positives_exclude_receiver_body_response(tmp_path):
+    run = _make_run(tmp_path)
+    (run / "references" / "handmade_animations").mkdir(parents=True, exist_ok=True)
+    body_rows = []
+    match_rows = []
+    rr_rows = []
+    v3_rows = []
+    for idx in range(12):
+        wid = f"win_{idx:02d}"
+        quality = "good_body_motion"
+        body_rows.append({
+            "window_id": wid,
+            "sample_id": f"sample_{idx:02d}",
+            "body_motion_quality": quality,
+            "static_or_micro_motion": idx == 6,
+            "minimal_head_motion_only": False,
+            "minimal_hand_jitter_only": False,
+            "active_bodypart_count_above_threshold": 3,
+            "moving_bodypart_count": 3,
+            "micro_motion_score": 0.0,
+        })
+        status = "likely_cowgirl_candidate"
+        if idx in {8, 9}:
+            status = "likely_transition_or_realign"
+        if idx == 5:
+            status = "likely_not_cowgirl_head_or_bj"
+        if idx == 6:
+            status = "likely_isolated_gesture"
+        if idx == 7:
+            status = "unknown_needs_review"
+        match_rows.append({
+            "window_id": wid,
+            "cowgirl_reference_score": 0.8 if idx < 5 else 0.2,
+            "doggy_reference_score": 0.2,
+            "bj_reference_score": 0.8 if idx == 5 else 0.1,
+            "head_reference_score": 0.7 if idx == 5 else 0.1,
+            "hand_reference_score": 0.1,
+            "recommended_review_status": status,
+        })
+        role_status = "likely_active_rider" if idx in {0, 1, 2, 3} else "role_unclear"
+        active = 0.85 if idx in {0, 1, 2, 3} else 0.2
+        receiver = 0.05
+        if idx == 4:
+            role_status = "likely_receiver_body_response"
+            active = 0.2
+            receiver = 0.9
+        rr_rows.append({
+            "window_id": wid,
+            "rider_receiver_status": role_status,
+            "active_rider_score": active,
+            "receiver_body_response_score": receiver,
+            "role_unclear_score": 0.1,
+            "pair_evidence": [{"pair_window_id": "pwin_02"}] if idx == 4 else [],
+        })
+        v3_rows.append({
+            "window_id": wid,
+            "sample_id": f"sample_{idx:02d}",
+            "duration_seconds": 4.0 if idx != 0 else 8.0,
+            "final_clean_cowgirl_rider_score_v3": 0.9 if idx in {0, 1, 2, 3} else 0.1,
+            "clean_cowgirl_rider_candidate_v3": idx in {0, 1, 2, 3},
+            "likely_receiver_false_positive": idx == 4,
+            "role_status": role_status,
+            "likely_grinding_subtype": idx == 1,
+            "cowgirl_grinding_score": 0.85 if idx == 1 else 0.2,
+            "reject_reasons": ["likely_receiver_body_response"] if idx == 4 else [],
+        })
+    write_jsonl(run / "audits" / "body_motion_quality.jsonl", body_rows)
+    write_jsonl(run / "references" / "handmade_animations" / "wild_reference_matches.jsonl", match_rows)
+    write_jsonl(run / "audits" / "rider_receiver_scores_v1.jsonl", rr_rows)
+    write_jsonl(run / "audits" / "cowgirl_candidate_scores_v3.jsonl", v3_rows)
+
+    out = run / "audits" / "semantic_review_010_v5"
+    export_semantic_review_010(
+        run,
+        out,
+        count=10,
+        attempt_timeline_export=False,
+        use_body_motion_quality=True,
+        use_handmade_reference_matches=True,
+        prefer_longer_cowgirl_windows=True,
+        use_cowgirl_candidate_score_v3=True,
+        use_rider_receiver_discrimination=True,
+    )
+    rows = load_jsonl(out / "semantic_review_010.jsonl")
+
+    likely = [row for row in rows if row["category"] == "likely_cowgirl_candidate"]
+    assert len(likely) == 4
+    assert all(row["system_semantic_guess"]["rider_receiver_status"] != "likely_receiver_body_response" for row in likely)
+    assert any(row["category"] == "receiver_body_response" for row in rows)

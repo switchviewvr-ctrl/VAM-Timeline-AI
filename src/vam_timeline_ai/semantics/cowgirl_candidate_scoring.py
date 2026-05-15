@@ -39,6 +39,31 @@ def score_cowgirl_candidates_v2(
     return rows
 
 
+def score_cowgirl_candidates_v3(
+    run_dir: str | Path,
+    wild_reference_matches: str | Path,
+    body_quality: str | Path,
+    rider_receiver_scores: str | Path,
+    features: str | Path,
+    out_jsonl: str | Path,
+    report: str | Path,
+) -> list[dict[str, Any]]:
+    run = Path(run_dir)
+    windows = {r.get("window_id"): r for r in load_jsonl(run / "semantic" / "movement_windows.jsonl") if r.get("window_id")}
+    matches = {r.get("window_id"): r for r in load_jsonl(wild_reference_matches) if r.get("window_id")}
+    body = {r.get("window_id"): r for r in load_jsonl(body_quality) if r.get("window_id")}
+    rider_receiver = {r.get("window_id"): r for r in load_jsonl(rider_receiver_scores) if r.get("window_id")}
+    feature_rows = {r.get("window_id"): r for r in load_jsonl(features) if r.get("window_id")}
+    rows = [
+        score_window_v3(feature_rows[wid], body.get(wid, {}), matches.get(wid, {}), windows.get(wid, {}), rider_receiver.get(wid, {}))
+        for wid in feature_rows
+    ]
+    rows.sort(key=lambda r: float(r.get("final_clean_cowgirl_rider_score_v3") or 0.0), reverse=True)
+    write_jsonl(out_jsonl, rows)
+    _write_report_v3(rows, report)
+    return rows
+
+
 def score_window(feature_row: dict[str, Any], body: dict[str, Any], match: dict[str, Any], window: dict[str, Any]) -> dict[str, Any]:
     values = feature_row.get("feature_values", {}) or {}
     duration = _num(window.get("duration_seconds") or window.get("window_size_seconds") or 0.0)
@@ -123,6 +148,81 @@ def score_window(feature_row: dict[str, Any], body: dict[str, Any], match: dict[
     }
 
 
+def score_window_v3(
+    feature_row: dict[str, Any],
+    body: dict[str, Any],
+    match: dict[str, Any],
+    window: dict[str, Any],
+    rider_receiver: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Score clean active-rider Cowgirl candidates for review triage only."""
+    base = score_window(feature_row, body, match, window)
+    rider_receiver = rider_receiver or {}
+    values = feature_row.get("feature_values", {}) or {}
+    role_status = str(rider_receiver.get("rider_receiver_status") or "role_unclear")
+    active = _num(rider_receiver.get("active_rider_score"))
+    receiver = _num(rider_receiver.get("receiver_body_response_score"))
+    role_unclear = _num(rider_receiver.get("role_unclear_score"))
+    pair_uncertainty = 0.18 if role_status == "insufficient_pair_context" else 0.0
+    receiver_penalty = 0.85 if role_status == "likely_receiver_body_response" else min(receiver * 0.55, 0.45)
+    role_unclear_penalty = 0.22 if role_status == "role_unclear" else min(role_unclear * 0.12, 0.18)
+
+    circularity = _num(values.get("pelvis_circularity_score_proxy"))
+    grind = _num(values.get("pelvis_grind_score_proxy"))
+    lateral = _num(values.get("pelvis_lateral_amplitude"))
+    forward = _num(values.get("pelvis_forward_back_amplitude"))
+    vertical = _num(values.get("pelvis_vertical_amplitude"))
+    rock = _num(values.get("pelvis_rock_score_proxy"))
+    bounce = _num(values.get("pelvis_bounce_score_proxy"))
+    balanced_horizontal = min(lateral, forward) / max(lateral, forward, 1e-6)
+    horizontal_dominance = (lateral + forward) / max(lateral + forward + vertical, 1e-6)
+    cowgirl_grinding_score = min(1.0, 0.35 * circularity + 0.35 * grind + 0.20 * balanced_horizontal + 0.10 * horizontal_dominance)
+    cowgirl_bounce_or_ride_score = min(1.0, 0.45 * min(vertical / 0.18, 1.0) + 0.25 * min(forward / 0.18, 1.0) + 0.15 * rock + 0.15 * bounce)
+
+    likely_grinding = cowgirl_grinding_score >= 0.55 and cowgirl_grinding_score >= cowgirl_bounce_or_ride_score * 0.85
+    likely_transition = bool(base.get("transition_penalty")) or base.get("motion_phase_candidate") == "transition_adjustment_candidate"
+    likely_receiver = role_status == "likely_receiver_body_response"
+    active_bonus = 0.16 * active if role_status in {"likely_active_rider", "insufficient_pair_context", "role_unclear"} else 0.0
+    subtype_bonus = 0.04 * max(cowgirl_grinding_score, cowgirl_bounce_or_ride_score)
+    raw = _num(base.get("final_clean_cowgirl_candidate_score")) + active_bonus + subtype_bonus
+    penalty = receiver_penalty + role_unclear_penalty + pair_uncertainty
+    final_score = max(0.0, min(1.0, raw * max(0.0, 1.0 - penalty)))
+
+    reject_reasons = list(base.get("reject_reasons", []))
+    if likely_receiver:
+        reject_reasons.append("likely_receiver_body_response")
+    if role_status == "role_unclear":
+        reject_reasons.append("role_unclear")
+    clean = bool(base.get("clean_cowgirl_candidate") and final_score >= 0.50 and not likely_receiver and role_status != "role_unclear")
+
+    out = dict(base)
+    out.update(
+        {
+            "active_rider_score": round(float(active), 6),
+            "receiver_body_response_score": round(float(receiver), 6),
+            "passive_context_score": rider_receiver.get("passive_context_score"),
+            "role_unclear_score": round(float(role_unclear), 6),
+            "role_status": role_status,
+            "active_rider_score_bonus": round(float(active_bonus), 6),
+            "receiver_body_response_penalty": round(float(receiver_penalty), 6),
+            "role_unclear_penalty": round(float(role_unclear_penalty), 6),
+            "pair_context_uncertainty_penalty": round(float(pair_uncertainty), 6),
+            "cowgirl_grinding_score": round(float(cowgirl_grinding_score), 6),
+            "cowgirl_bounce_or_ride_score": round(float(cowgirl_bounce_or_ride_score), 6),
+            "likely_grinding_subtype": bool(likely_grinding),
+            "likely_transition_context": bool(likely_transition),
+            "likely_receiver_false_positive": bool(likely_receiver),
+            "final_clean_cowgirl_rider_score_v3": round(float(final_score), 6),
+            "clean_cowgirl_rider_candidate_v3": clean,
+            "reject_reasons": _dedupe(reject_reasons),
+            "rider_receiver_evidence": rider_receiver.get("evidence", {}),
+            "rider_receiver_warnings": rider_receiver.get("warnings", []),
+            "is_human_ground_truth": False,
+        }
+    )
+    return out
+
+
 def _write_report(rows: list[dict[str, Any]], report: str | Path) -> None:
     target = Path(report)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -145,6 +245,58 @@ def _write_report(rows: list[dict[str, Any]], report: str | Path) -> None:
     for row in rows[:20]:
         lines.append(f"- `{row.get('window_id')}` score={row.get('final_clean_cowgirl_candidate_score')} duration={row.get('duration_seconds')} scene=`{row.get('source_scene_file')}` reject={row.get('reject_reasons')}")
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_report_v3(rows: list[dict[str, Any]], report: str | Path) -> None:
+    target = Path(report)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    clean = [r for r in rows if r.get("clean_cowgirl_rider_candidate_v3")]
+    receiver = [r for r in rows if r.get("likely_receiver_false_positive")]
+    grinding = [r for r in rows if r.get("likely_grinding_subtype")]
+    role_counts = Counter(r.get("role_status") for r in rows)
+    rejection_counts = Counter(reason for r in rows for reason in r.get("reject_reasons", []))
+    lines = [
+        "# Cowgirl Candidate Score V3 Report",
+        "",
+        "Scores are review triage only. They are not labels and not ML targets.",
+        "V3 adds rider/receiver body-response penalties while keeping grinding as a valid Cowgirl subtype.",
+        "",
+        f"- Windows scored: {len(rows)}",
+        f"- Clean active-rider Cowgirl candidates: {len(clean)}",
+        f"- Receiver/body-response false-positive candidates: {len(receiver)}",
+        f"- Grinding subtype candidates: {len(grinding)}",
+        "",
+        "## Role Status Counts",
+        "",
+    ]
+    for status, count in role_counts.most_common():
+        lines.append(f"- `{status}`: {count}")
+    lines.extend(["", "## Rejection Reasons", ""])
+    for reason, count in rejection_counts.most_common():
+        lines.append(f"- `{reason}`: {count}")
+    lines.extend(["", "## Top Clean Active-Rider Candidates", ""])
+    for row in clean[:20]:
+        lines.append(
+            f"- `{row.get('window_id')}` score={row.get('final_clean_cowgirl_rider_score_v3')} "
+            f"role=`{row.get('role_status')}` grinding={row.get('cowgirl_grinding_score')} "
+            f"scene=`{row.get('source_scene_file')}`"
+        )
+    lines.extend(["", "## High Receiver False-Positive Candidates", ""])
+    for row in sorted(receiver, key=lambda r: float(r.get("receiver_body_response_score") or 0.0), reverse=True)[:20]:
+        lines.append(
+            f"- `{row.get('window_id')}` receiver={row.get('receiver_body_response_score')} "
+            f"active={row.get('active_rider_score')} v3={row.get('final_clean_cowgirl_rider_score_v3')} "
+            f"scene=`{row.get('source_scene_file')}`"
+        )
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _dedupe(items: list[str]) -> list[str]:
+    out = []
+    for item in items:
+        if item and item not in out:
+            out.append(item)
+    return out
 
 
 def _num(value: Any) -> float:

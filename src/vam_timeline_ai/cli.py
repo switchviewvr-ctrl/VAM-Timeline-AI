@@ -71,6 +71,8 @@ def build_parser() -> argparse.ArgumentParser:
     semantic_review.add_argument("--prefer-longer-cowgirl-windows", default="false")
     semantic_review.add_argument("--min-cowgirl-window-seconds", type=float, default=4.0)
     semantic_review.add_argument("--use-cowgirl-candidate-score-v2", default="false")
+    semantic_review.add_argument("--use-cowgirl-candidate-score-v3", default="false")
+    semantic_review.add_argument("--use-rider-receiver-discrimination", default="false")
 
     semantic_summary = subparsers.add_parser("summarize-semantic-review-010", help="Summarize user answers for the 10-item semantic review.")
     semantic_summary.add_argument("--answers", required=True)
@@ -143,6 +145,25 @@ def build_parser() -> argparse.ArgumentParser:
     cowgirl_score.add_argument("--features", required=True)
     cowgirl_score.add_argument("--out-jsonl", required=True)
     cowgirl_score.add_argument("--report", required=True)
+
+    rider_receiver = subparsers.add_parser("score-rider-receiver-v1", help="Score active rider vs receiver/body-response review candidates.")
+    rider_receiver.add_argument("--run-dir", required=True)
+    rider_receiver.add_argument("--features", required=True)
+    rider_receiver.add_argument("--pair-features", required=True)
+    rider_receiver.add_argument("--pair-windows", required=True)
+    rider_receiver.add_argument("--body-quality", required=True)
+    rider_receiver.add_argument("--wild-reference-matches", required=True)
+    rider_receiver.add_argument("--out-jsonl", required=True)
+    rider_receiver.add_argument("--report", required=True)
+
+    cowgirl_score_v3 = subparsers.add_parser("score-cowgirl-candidates-v3", help="Score clean active-rider Cowgirl candidates with receiver/body-response penalties.")
+    cowgirl_score_v3.add_argument("--run-dir", required=True)
+    cowgirl_score_v3.add_argument("--wild-reference-matches", required=True)
+    cowgirl_score_v3.add_argument("--body-quality", required=True)
+    cowgirl_score_v3.add_argument("--rider-receiver-scores", required=True)
+    cowgirl_score_v3.add_argument("--features", required=True)
+    cowgirl_score_v3.add_argument("--out-jsonl", required=True)
+    cowgirl_score_v3.add_argument("--report", required=True)
 
     cmap = subparsers.add_parser("discover-controller-map", help="Discover controller names and conservative body-part mapping.")
     cmap.add_argument("--sample-index", required=True)
@@ -684,6 +705,47 @@ def cmd_score_cowgirl_candidates_v2(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_score_rider_receiver_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.rider_receiver_discrimination import score_rider_receiver_v1
+
+    rows = score_rider_receiver_v1(
+        args.run_dir,
+        args.features,
+        args.pair_features,
+        args.pair_windows,
+        args.body_quality,
+        args.wild_reference_matches,
+        args.out_jsonl,
+        args.report,
+    )
+    counts: dict[str, int] = {}
+    for row in rows:
+        key = str(row.get("rider_receiver_status"))
+        counts[key] = counts.get(key, 0) + 1
+    print(f"Rider/receiver scores written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; status counts: {counts}")
+    return 0
+
+
+def cmd_score_cowgirl_candidates_v3(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_cowgirl_candidates_v3
+
+    rows = score_cowgirl_candidates_v3(
+        args.run_dir,
+        args.wild_reference_matches,
+        args.body_quality,
+        args.rider_receiver_scores,
+        args.features,
+        args.out_jsonl,
+        args.report,
+    )
+    clean = sum(1 for row in rows if row.get("clean_cowgirl_rider_candidate_v3"))
+    receiver = sum(1 for row in rows if row.get("likely_receiver_false_positive"))
+    print(f"Cowgirl candidate scores v3 written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; clean active-rider candidates: {clean}; receiver false positives: {receiver}")
+    return 0
+
+
 def cmd_discover_controller_map(args: argparse.Namespace) -> int:
     from vam_timeline_ai.motion.controller_mapping import discover_controller_map
 
@@ -1221,6 +1283,8 @@ def cmd_export_semantic_review_010(args: argparse.Namespace) -> int:
         prefer_longer_cowgirl_windows=_arg_bool(args.prefer_longer_cowgirl_windows),
         min_cowgirl_window_seconds=args.min_cowgirl_window_seconds,
         use_cowgirl_candidate_score_v2=_arg_bool(args.use_cowgirl_candidate_score_v2),
+        use_cowgirl_candidate_score_v3=_arg_bool(args.use_cowgirl_candidate_score_v3),
+        use_rider_receiver_discrimination=_arg_bool(args.use_rider_receiver_discrimination),
     )
     print(f"Semantic review 010 written: {args.out_dir}")
     print(f"Review items: {summary['review_items']}; categories={summary['category_distribution']}")
@@ -1313,6 +1377,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_audit_body_motion_quality(args)
     if args.command == "score-cowgirl-candidates-v2":
         return cmd_score_cowgirl_candidates_v2(args)
+    if args.command == "score-rider-receiver-v1":
+        return cmd_score_rider_receiver_v1(args)
+    if args.command == "score-cowgirl-candidates-v3":
+        return cmd_score_cowgirl_candidates_v3(args)
     if args.command == "discover-controller-map":
         return cmd_discover_controller_map(args)
     if args.command == "extract-cowgirl-features-v1":

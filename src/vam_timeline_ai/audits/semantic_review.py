@@ -54,6 +54,8 @@ def export_semantic_review_010(
     prefer_longer_cowgirl_windows: bool = False,
     min_cowgirl_window_seconds: float = 4.0,
     use_cowgirl_candidate_score_v2: bool = False,
+    use_cowgirl_candidate_score_v3: bool = False,
+    use_rider_receiver_discrimination: bool = False,
 ) -> dict[str, Any]:
     if count != 10:
         raise ValueError("semantic review MVP expects exactly 10 items")
@@ -68,8 +70,15 @@ def export_semantic_review_010(
         "prefer_longer_cowgirl_windows": prefer_longer_cowgirl_windows,
         "min_cowgirl_window_seconds": min_cowgirl_window_seconds,
         "use_cowgirl_candidate_score_v2": use_cowgirl_candidate_score_v2,
+        "use_cowgirl_candidate_score_v3": use_cowgirl_candidate_score_v3,
+        "use_rider_receiver_discrimination": use_rider_receiver_discrimination,
     }
-    selected = _select_10_v4(data) if use_cowgirl_candidate_score_v2 else _select_10_v3(data) if (use_body_motion_quality or use_handmade_reference_matches or prefer_clean_body_motion) else _select_10(data)
+    if use_cowgirl_candidate_score_v3 or use_rider_receiver_discrimination:
+        selected = _select_10_v5(data)
+    elif use_cowgirl_candidate_score_v2:
+        selected = _select_10_v4(data)
+    else:
+        selected = _select_10_v3(data) if (use_body_motion_quality or use_handmade_reference_matches or prefer_clean_body_motion) else _select_10(data)
     rows: list[dict[str, Any]] = []
     export_results: list[dict[str, Any]] = []
     timeline_root = out / "timeline_segments"
@@ -166,6 +175,8 @@ def _load_data(run: Path) -> dict[str, Any]:
         "body_quality": {r.get("window_id"): r for r in load_jsonl(run / "audits" / "body_motion_quality.jsonl") if r.get("window_id")},
         "reference_matches": {r.get("window_id"): r for r in load_jsonl(run / "references" / "handmade_animations" / "wild_reference_matches.jsonl") if r.get("window_id")},
         "cowgirl_scores_v2": {r.get("window_id"): r for r in load_jsonl(run / "audits" / "cowgirl_candidate_scores_v2.jsonl") if r.get("window_id")},
+        "rider_receiver_scores": {r.get("window_id"): r for r in load_jsonl(run / "audits" / "rider_receiver_scores_v1.jsonl") if r.get("window_id")},
+        "cowgirl_scores_v3": {r.get("window_id"): r for r in load_jsonl(run / "audits" / "cowgirl_candidate_scores_v3.jsonl") if r.get("window_id")},
     }
 
 
@@ -323,6 +334,117 @@ def _select_10_v4(data: dict[str, Any]) -> list[dict[str, Any]]:
     return selected
 
 
+def _select_10_v5(data: dict[str, Any]) -> list[dict[str, Any]]:
+    flags = data.get("selection_flags", {})
+    min_duration = float(flags.get("min_cowgirl_window_seconds") or 4.0)
+    quotas = {
+        "likely_cowgirl_candidate": 4,
+        "transition_realign": 2,
+        "receiver_body_response": 1,
+        "likely_head_bj_false_positive": 1,
+        "isolated_gesture": 1,
+        "unknown_mess": 1,
+    }
+    pools = {key: [] for key in quotas}
+    grinding_wids: set[str] = set()
+    for wid, score in data["cowgirl_scores_v3"].items():
+        duration = float(score.get("duration_seconds") or 0.0)
+        role_status = score.get("role_status")
+        if score.get("likely_grinding_subtype"):
+            grinding_wids.add(str(wid))
+        if (
+            score.get("clean_cowgirl_rider_candidate_v3")
+            and duration >= min_duration
+            and role_status != "likely_receiver_body_response"
+            and not score.get("likely_receiver_false_positive")
+        ):
+            bonus = 0.03 if score.get("likely_grinding_subtype") else 0.0
+            pools["likely_cowgirl_candidate"].append(
+                _candidate(
+                    "likely_cowgirl_candidate",
+                    wid,
+                    _pair_id_from_role_score(score),
+                    float(score.get("final_clean_cowgirl_rider_score_v3") or 0.0) + bonus,
+                    [
+                        "clean Cowgirl rider score v3",
+                        f"duration {duration:.1f}s",
+                        f"role status {role_status}",
+                        "receiver/body-response penalty did not trigger",
+                    ],
+                    ["clean_cowgirl_candidate_v3", "cowgirl_circular_grind" if score.get("likely_grinding_subtype") else "active_rider_candidate"],
+                )
+            )
+    if grinding_wids and not any(item["window_id"] in grinding_wids for item in pools["likely_cowgirl_candidate"]):
+        for wid in grinding_wids:
+            score = data["cowgirl_scores_v3"].get(wid, {})
+            if score.get("likely_receiver_false_positive"):
+                continue
+            pools["likely_cowgirl_candidate"].append(
+                _candidate(
+                    "likely_cowgirl_candidate",
+                    wid,
+                    _pair_id_from_role_score(score),
+                    float(score.get("final_clean_cowgirl_rider_score_v3") or 0.0) * 0.8,
+                    ["grinding subtype review candidate", "added to keep grinding represented"],
+                    ["cowgirl_circular_grind", "clean_cowgirl_candidate_v3"],
+                )
+            )
+            break
+
+    for wid, score in data["rider_receiver_scores"].items():
+        status = score.get("rider_receiver_status")
+        receiver_score = float(score.get("receiver_body_response_score") or 0.0)
+        bq = data["body_quality"].get(wid, {})
+        quality = bq.get("body_motion_quality")
+        root_or_static = quality in {"controller_only_whole_person_motion", "root_only_motion", "static_or_micro_motion", "static_or_empty"}
+        if (status == "likely_receiver_body_response" or receiver_score >= 0.55) and not root_or_static:
+            pools["receiver_body_response"].append(
+                _candidate(
+                    "receiver_body_response",
+                    wid,
+                    _pair_id_from_role_score(score),
+                    receiver_score,
+                    ["receiver/body-response false-positive candidate", f"role status {status}", "other actor appears more active in pair context"],
+                    ["receiver_body_response", "not_active_rider"],
+                )
+            )
+
+    for wid, frow in data["features"].items():
+        bq = data["body_quality"].get(wid, {})
+        match = data["reference_matches"].get(wid, {})
+        phase = classify_motion_phase(frow, bq)["motion_phase_candidate"]
+        guard = evaluate_domain_guards(frow, bq)
+        status = match.get("recommended_review_status")
+        cow_score = float(match.get("cowgirl_reference_score") or 0.0)
+        head_score = max(float(match.get("bj_reference_score") or 0.0), float(match.get("head_reference_score") or 0.0))
+        quality = bq.get("body_motion_quality", "unknown")
+        doggy_score = float(match.get("doggy_reference_score") or 0.0)
+        if status == "likely_transition_or_realign" or phase == "transition_adjustment_candidate":
+            pools["transition_realign"].append(_candidate("transition_realign", wid, None, max(cow_score, 0.5), ["transition/realign-like motion", f"phase {phase}"], ["transition_adjustment_candidate"]))
+        if status == "likely_not_cowgirl_head_or_bj" or "possible_non_cowgirl_head_dominant_motion" in guard.get("domain_guard_audit_labels", []):
+            pools["likely_head_bj_false_positive"].append(_candidate("likely_head_bj_false_positive", wid, None, head_score, ["head/BJ-domain guard candidate"], ["possible_non_cowgirl_head_dominant_motion"]))
+        if status == "likely_isolated_gesture" or bq.get("static_or_micro_motion") or bq.get("minimal_head_motion_only") or bq.get("minimal_hand_jitter_only"):
+            pools["isolated_gesture"].append(_candidate("isolated_gesture", wid, None, max(head_score, float(match.get("hand_reference_score") or 0.0), float(bq.get("micro_motion_score") or 0.0)), ["isolated/static micro-motion candidate"], ["static_or_micro_motion" if bq.get("static_or_micro_motion") else "likely_isolated_gesture"]))
+        if status == "likely_doggy_or_other_hip_motion" and len(pools["unknown_mess"]) < 50:
+            pools["unknown_mess"].append(_candidate("unknown_mess", wid, None, doggy_score, ["doggy/other hip-motion confusion candidate kept as unknown/mess slot"], ["likely_doggy_or_other_hip_motion"]))
+        if status in {"root_or_controller_only_false_positive", "unknown_needs_review"} or quality in {"controller_only_whole_person_motion", "root_only_motion", "static_or_empty"}:
+            pools["unknown_mess"].append(_candidate("unknown_mess", wid, None, 1.0 if quality in {"controller_only_whole_person_motion", "root_only_motion"} else 0.4, [f"quality/status needs audit: {quality}/{status}"], [status or quality]))
+    for rows in pools.values():
+        _enrich_candidates(rows, data)
+        rows.sort(key=lambda r: float(r.get("score") or 0.0), reverse=True)
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    per_scene: Counter[str] = Counter()
+    per_sample: Counter[str] = Counter()
+    for category, quota in quotas.items():
+        _take(pools[category], quota, selected, seen, per_scene, per_sample, strict=True)
+    if len(selected) < 10:
+        _take([c for rows in pools.values() for c in rows], 10 - len(selected), selected, seen, per_scene, per_sample, strict=False)
+    if len(selected) != 10:
+        raise ValueError(f"Could not select exactly 10 examples; selected {len(selected)}")
+    return selected
+
+
 def _positive_candidates(data: dict[str, Any]) -> list[dict[str, Any]]:
     out = []
     wanted = {"cowgirl_vertical_bounce", "cowgirl_forward_back_rock", "cowgirl_circular_grind"}
@@ -405,6 +527,14 @@ def _candidate(category: str, wid: str, pid: str | None, score: float, reasons: 
     return {"category": category, "window_id": wid, "pair_window_id": pid, "score": score, "why_selected": reasons, "labels": labels}
 
 
+def _pair_id_from_role_score(score: dict[str, Any]) -> str | None:
+    for item in score.get("pair_evidence", []) or []:
+        pid = item.get("pair_window_id")
+        if pid:
+            return str(pid)
+    return None
+
+
 def _enrich_candidates(candidates: list[dict[str, Any]], data: dict[str, Any]) -> None:
     for item in candidates:
         wrow = data["windows"].get(item.get("window_id"), {})
@@ -456,10 +586,12 @@ def _make_review_row(idx: int, item: dict[str, Any], data: dict[str, Any]) -> di
     body_quality = data["body_quality"].get(wid, {})
     reference_match = data["reference_matches"].get(wid, {})
     cowgirl_score = data["cowgirl_scores_v2"].get(wid, {})
+    rider_receiver = data["rider_receiver_scores"].get(wid, {})
+    cowgirl_score_v3 = data["cowgirl_scores_v3"].get(wid, {})
     phase = classify_motion_phase(frow, body_quality)
     guard = evaluate_domain_guards(frow, body_quality)
     review_id = f"review_{idx:03d}"
-    guess = _semantic_guess(item, frow, window_scores, pair_feature, pair_scores, silver_window, silver_pair, body_quality, phase, guard, reference_match)
+    guess = _semantic_guess(item, frow, window_scores, pair_feature, pair_scores, silver_window, silver_pair, body_quality, phase, guard, reference_match, rider_receiver, cowgirl_score_v3)
     pair_actor = _pair_actor(wid, pair)
     return {
         "review_id": review_id,
@@ -493,12 +625,14 @@ def _make_review_row(idx: int, item: dict[str, Any], data: dict[str, Any]) -> di
             "domain_guard_warnings": guard,
             "handmade_reference_match": reference_match,
             "clean_cowgirl_candidate_score_v2": cowgirl_score,
+            "rider_receiver_discrimination": rider_receiver,
+            "clean_cowgirl_candidate_score_v3": cowgirl_score_v3,
         },
         "why_selected": item["why_selected"],
         "user_questions": _questions_for_item(bool(pair)),
         "answer_options": ["correct", "wrong", "unclear"],
         "is_human_ground_truth": False,
-        "export_context_padding_seconds": 0.5 if data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v2") else 0.0,
+        "export_context_padding_seconds": 0.5 if (data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v2") or data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v3")) else 0.0,
     }
 
 
@@ -514,6 +648,8 @@ def _semantic_guess(
     phase: dict[str, Any] | None = None,
     guard: dict[str, Any] | None = None,
     reference_match: dict[str, Any] | None = None,
+    rider_receiver: dict[str, Any] | None = None,
+    cowgirl_score_v3: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     score_labels = [str(r.get("label")) for r in sorted(scores, key=lambda r: float(r.get("final_score") or 0.0), reverse=True)]
     silver_labels = list(silver_window.get("positive_labels", []) or [])
@@ -540,6 +676,8 @@ def _semantic_guess(
     phase = phase or {}
     guard = guard or {}
     reference_match = reference_match or {}
+    rider_receiver = rider_receiver or {}
+    cowgirl_score_v3 = cowgirl_score_v3 or {}
     multiplier = float(guard.get("cowgirl_confidence_multiplier") or 1.0)
     if body_quality.get("body_motion_quality") in {"controller_only_whole_person_motion", "root_only_motion"}:
         active_candidate = "unsafe/root-motion only; not valid rider output"
@@ -549,6 +687,27 @@ def _semantic_guess(
     if "possible_non_cowgirl_head_dominant_motion" in guard.get("domain_guard_audit_labels", []):
         movement_labels = _dedupe(["possible_non_cowgirl_head_dominant_motion", *movement_labels])[:3]
         move_conf *= multiplier
+    role_status = rider_receiver.get("rider_receiver_status")
+    active_score = _num(rider_receiver.get("active_rider_score"), 0.0)
+    receiver_score = _num(rider_receiver.get("receiver_body_response_score"), 0.0)
+    role_conf = max(role_conf, active_score, receiver_score)
+    if cowgirl_score_v3.get("likely_grinding_subtype"):
+        movement_labels = _dedupe(["cowgirl_circular_grind", *movement_labels])[:3]
+        move_conf = max(move_conf, _num(cowgirl_score_v3.get("cowgirl_grinding_score"), 0.0))
+    if role_status == "likely_active_rider":
+        active_candidate = "likely yes (motion/pair evidence)"
+        passive_candidate = "unlikely"
+    elif role_status == "likely_receiver_body_response":
+        active_candidate = "likely no - receiver/body-response candidate"
+        passive_candidate = "likely receiver/body-response"
+        movement_labels = _dedupe(["receiver_body_response", "not_active_rider", *movement_labels])[:4]
+    elif role_status == "likely_passive_context":
+        active_candidate = "likely no - passive context candidate"
+        passive_candidate = "likely passive/context"
+    elif role_status == "insufficient_pair_context" and item["category"] == "likely_cowgirl_candidate":
+        active_candidate = "possible; pair context unavailable"
+    elif role_status == "role_unclear":
+        active_candidate = "unclear; rider/receiver evidence conflicts"
     return {
         "active_rider_candidate": active_candidate,
         "passive_receiver_candidate": passive_candidate,
@@ -564,6 +723,17 @@ def _semantic_guess(
         "domain_guard_warnings": guard.get("domain_guard_warnings", []),
         "reference_review_status": reference_match.get("recommended_review_status"),
         "nearest_handmade_reference_families": reference_match.get("nearest_reference_families", []),
+        "rider_receiver_status": role_status,
+        "active_rider_score": round(float(active_score), 3),
+        "receiver_body_response_score": round(float(receiver_score), 3),
+        "clean_cowgirl_rider_score_v3": cowgirl_score_v3.get("final_clean_cowgirl_rider_score_v3"),
+        "cowgirl_grinding_score": cowgirl_score_v3.get("cowgirl_grinding_score"),
+        "likely_grinding_subtype": cowgirl_score_v3.get("likely_grinding_subtype"),
+        "why_not_receiver_body_response": (
+            "receiver/body-response penalty did not trigger"
+            if role_status != "likely_receiver_body_response"
+            else "receiver/body-response penalty triggered; do not treat as active rider without human confirmation"
+        ),
         "warning": "Machine/weak/silver labels are hints only and not human truth.",
     }
 
@@ -901,6 +1071,9 @@ def _item_markdown(row: dict[str, Any]) -> list[str]:
         f"- posture: {', '.join(guess.get('posture_labels', []))}",
         f"- body motion quality: {guess.get('body_motion_quality')}",
         f"- phase: {guess.get('motion_phase_candidate')}",
+        f"- rider/receiver status: {guess.get('rider_receiver_status')} (active={guess.get('active_rider_score')}, receiver={guess.get('receiver_body_response_score')})",
+        f"- clean Cowgirl rider score v3: {guess.get('clean_cowgirl_rider_score_v3')}",
+        f"- grinding subtype score: {guess.get('cowgirl_grinding_score')}",
         f"- reference status: {guess.get('reference_review_status')}",
         f"- domain warnings: {', '.join(guess.get('domain_guard_warnings', [])) or 'none'}",
         f"- confidence: role={guess.get('role_confidence')}, movement={guess.get('movement_confidence')}, contact={guess.get('contact_confidence')}, overall={guess.get('overall_confidence')}",
@@ -912,6 +1085,8 @@ def _item_markdown(row: dict[str, Any]) -> list[str]:
         f"- machine proposals: `{', '.join(item.get('label', '') for item in evidence.get('machine_proposals', [])[:6])}`",
         f"- handmade reference match: `{_compact(evidence.get('handmade_reference_match', {}), 6)}`",
         f"- clean Cowgirl score v2: `{_compact(evidence.get('clean_cowgirl_candidate_score_v2', {}), 8)}`",
+        f"- rider/receiver evidence: `{_compact(evidence.get('rider_receiver_discrimination', {}), 8)}`",
+        f"- clean Cowgirl score v3: `{_compact(evidence.get('clean_cowgirl_candidate_score_v3', {}), 8)}`",
         "",
         "What to check in VaM:",
         *[f"- {q}" for q in row.get("user_questions", [])],
@@ -998,6 +1173,10 @@ def _write_index_html(rows: list[dict[str, Any]], out: Path) -> None:
             f"<li>Contact: {html.escape(', '.join(guess.get('contact_labels', [])))}</li>"
             f"<li>Body quality: {html.escape(str(guess.get('body_motion_quality')))}</li>"
             f"<li>Phase: {html.escape(str(guess.get('motion_phase_candidate')))}</li>"
+            f"<li>Rider/receiver status: {html.escape(str(guess.get('rider_receiver_status')))} "
+            f"(active={guess.get('active_rider_score')}, receiver={guess.get('receiver_body_response_score')})</li>"
+            f"<li>Clean Cowgirl rider score v3: {html.escape(str(guess.get('clean_cowgirl_rider_score_v3')))}</li>"
+            f"<li>Grinding subtype score: {html.escape(str(guess.get('cowgirl_grinding_score')))}</li>"
             f"<li>Reference status: {html.escape(str(guess.get('reference_review_status')))}</li>"
             f"<li>Overall confidence: {guess.get('overall_confidence')}</li></ul>"
             f"<p><b>Hints are not truth.</b> Machine/weak/silver labels must be checked in VaM.</p>"
@@ -1060,6 +1239,7 @@ def _write_semantic_result(out: Path, rows: list[dict[str, Any]], status: str, c
         possible_cowgirl = labels.get("possible_cowgirl_context", 0)
         transition = labels.get("transition_adjustment", 0)
         root_false = labels.get("controller_only_whole_person_motion", 0) + labels.get("root_only_motion_false_positive", 0)
+        receiver_response = labels.get("receiver_body_response", 0) + labels.get("passive_receiver_motion", 0)
         wrong_or_unclear = counts.get("user_verdict", Counter()).get("wrong", 0) + counts.get("user_verdict", Counter()).get("unclear", 0)
         correct = counts.get("user_verdict", Counter()).get("correct", 0)
         if (cowgirl_true <= 1 and len(rows) >= 10) or wrong_or_unclear > correct:
@@ -1078,6 +1258,7 @@ def _write_semantic_result(out: Path, rows: list[dict[str, Any]], status: str, c
                 f"- Possible Cowgirl context/ambiguous examples: {possible_cowgirl}",
                 f"- Transition/adjustment/in-between examples: {transition}",
                 f"- Whole-person/controller/root false positives: {root_false}",
+                f"- Receiver/body-response false-positive audit labels: {receiver_response}",
                 "- Semantic trust is low; machine/silver labels are not ready for ML.",
                 "- Required fixes: detect root/controller-only motion, reduce transition false positives, add domain guards, and calibrate against handmade references.",
                 "",
