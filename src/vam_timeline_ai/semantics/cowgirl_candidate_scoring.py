@@ -338,6 +338,64 @@ def score_cowgirl_candidates_v9(
     return rows
 
 
+def score_cowgirl_candidates_v10(
+    run_dir: str | Path,
+    relative_reference_matches: str | Path,
+    relative_features: str | Path,
+    trajectory_features: str | Path,
+    body_quality: str | Path,
+    rider_receiver_scores: str | Path,
+    pose_export_validity: str | Path,
+    controller_validity: str | Path,
+    pose_anchor_completeness: str | Path,
+    controller_orientation_validity: str | Path,
+    controller_distance_validity: str | Path,
+    cowgirl_core_controllers: str | Path,
+    bj_oral_trap_guard: str | Path,
+    features: str | Path,
+    out_jsonl: str | Path,
+    report: str | Path,
+) -> list[dict[str, Any]]:
+    run = Path(run_dir)
+    windows = {r.get("window_id"): r for r in load_jsonl(run / "semantic" / "movement_windows.jsonl") if r.get("window_id")}
+    rel_matches = {r.get("window_id"): r for r in load_jsonl(relative_reference_matches) if r.get("window_id")}
+    rel_features = {r.get("window_id"): r for r in load_jsonl(relative_features) if r.get("window_id")}
+    trajectories = {r.get("window_id"): r for r in load_jsonl(trajectory_features) if r.get("window_id")}
+    body = {r.get("window_id"): r for r in load_jsonl(body_quality) if r.get("window_id")}
+    rider_receiver = {r.get("window_id"): r for r in load_jsonl(rider_receiver_scores) if r.get("window_id")}
+    pose_validity = {r.get("window_id"): r for r in load_jsonl(pose_export_validity) if r.get("window_id")}
+    controller = {r.get("window_id"): r for r in load_jsonl(controller_validity) if r.get("window_id")}
+    anchors = {r.get("window_id"): r for r in load_jsonl(pose_anchor_completeness) if r.get("window_id")}
+    orientations = {r.get("window_id"): r for r in load_jsonl(controller_orientation_validity) if r.get("window_id")}
+    distances = {r.get("window_id"): r for r in load_jsonl(controller_distance_validity) if r.get("window_id")}
+    core = {r.get("window_id"): r for r in load_jsonl(cowgirl_core_controllers) if r.get("window_id")}
+    traps = {r.get("window_id"): r for r in load_jsonl(bj_oral_trap_guard) if r.get("window_id")}
+    feature_rows = {r.get("window_id"): r for r in load_jsonl(features) if r.get("window_id")}
+    rows = [
+        score_window_v10(
+            feature_rows[wid],
+            body.get(wid, {}),
+            rel_matches.get(wid, {}),
+            rel_features.get(wid, {}),
+            trajectories.get(wid, {}),
+            windows.get(wid, {}),
+            rider_receiver.get(wid, {}),
+            pose_validity.get(wid, {}),
+            controller.get(wid, {}),
+            anchors.get(wid, {}),
+            orientations.get(wid, {}),
+            distances.get(wid, {}),
+            core.get(wid, {}),
+            traps.get(wid, {}),
+        )
+        for wid in feature_rows
+    ]
+    rows.sort(key=lambda r: float(r.get("final_semantic_cowgirl_score_v10") or 0.0), reverse=True)
+    write_jsonl(out_jsonl, rows)
+    _write_report_v10(rows, report)
+    return rows
+
+
 def score_window(feature_row: dict[str, Any], body: dict[str, Any], match: dict[str, Any], window: dict[str, Any]) -> dict[str, Any]:
     values = feature_row.get("feature_values", {}) or {}
     duration = _num(window.get("duration_seconds") or window.get("window_size_seconds") or 0.0)
@@ -1169,6 +1227,155 @@ def score_window_v9(
     return out
 
 
+def score_window_v10(
+    feature_row: dict[str, Any],
+    body: dict[str, Any],
+    relative_match: dict[str, Any],
+    relative_feature: dict[str, Any],
+    trajectory: dict[str, Any],
+    window: dict[str, Any],
+    rider_receiver: dict[str, Any] | None = None,
+    pose_validity: dict[str, Any] | None = None,
+    controller_validity: dict[str, Any] | None = None,
+    pose_anchor: dict[str, Any] | None = None,
+    orientation_validity: dict[str, Any] | None = None,
+    distance_validity: dict[str, Any] | None = None,
+    core_controllers: dict[str, Any] | None = None,
+    bj_oral_guard: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    v9 = score_window_v9(
+        feature_row,
+        body,
+        relative_match,
+        relative_feature,
+        trajectory,
+        window,
+        rider_receiver,
+        pose_validity,
+        controller_validity,
+        pose_anchor,
+        orientation_validity,
+        distance_validity,
+    )
+    core_controllers = core_controllers or {}
+    bj_oral_guard = bj_oral_guard or {}
+    controller_validity = controller_validity or {}
+    distance_validity = distance_validity or {}
+    semantic = _bounded(v9.get("final_semantic_cowgirl_score_v9"))
+    clean = _bounded(v9.get("final_clean_motion_score_v9"))
+    generation_v9 = _bounded(v9.get("final_generation_candidate_score_v9"))
+    core_gate = core_controllers.get("generation_safe_core_controller_gate")
+    missing_core = bool(core_gate is False or core_controllers.get("cowgirl_core_controller_status") == "missing_core")
+    missing_core_controllers = list(core_controllers.get("missing_core_controllers") or [])
+    bj_trap = bool(bj_oral_guard.get("head_or_oral_domain_trap") or bj_oral_guard.get("cowgirl_pose_false_positive"))
+    arm_stretch = bool(
+        distance_validity.get("arm_stretch_outlier")
+        or distance_validity.get("arm_stretch_pose_invalid")
+        or distance_validity.get("hand_controller_outlier")
+        or controller_validity.get("hand_controller_outlier")
+    )
+    standing = bool(v9.get("standing_gesture_false_positive"))
+    receiver = bool(v9.get("receiver_response_negative"))
+    anchor_incomplete = bool(v9.get("semantic_cowgirl_anchor_incomplete"))
+    orientation_invalid = bool(v9.get("semantic_cowgirl_orientation_invalid"))
+    distance_invalid = bool(v9.get("semantic_cowgirl_distance_invalid") or v9.get("controller_distance_outlier"))
+    context_intro = bool(v9.get("cowgirl_context_intro_low_motion"))
+    export_unavailable = bool(v9.get("export_unavailable_for_generation"))
+    generation_multiplier = 1.0
+    if missing_core:
+        generation_multiplier = min(generation_multiplier, 0.0)
+    if bj_trap:
+        generation_multiplier = min(generation_multiplier, 0.0)
+    if arm_stretch:
+        generation_multiplier = min(generation_multiplier, 0.04)
+    final_generation = float(np.clip(generation_v9 * generation_multiplier, 0.0, 1.0))
+    semantic_candidate = bool(v9.get("semantic_cowgirl_candidate_v9"))
+    generation_safe = bool(
+        semantic_candidate
+        and v9.get("semantic_cowgirl_generation_safe")
+        and final_generation >= 0.20
+        and core_gate is True
+        and not missing_core
+        and not bj_trap
+        and not arm_stretch
+        and not standing
+        and not receiver
+        and not anchor_incomplete
+        and not orientation_invalid
+        and not distance_invalid
+        and not export_unavailable
+    )
+    pose_invalid = bool(
+        semantic_candidate
+        and not generation_safe
+        and not missing_core
+        and not bj_trap
+        and not standing
+        and not receiver
+        and (anchor_incomplete or orientation_invalid or distance_invalid or arm_stretch or v9.get("semantic_cowgirl_pose_invalid"))
+    )
+    classification = "unknown_or_unusable"
+    if generation_safe:
+        classification = "semantic_cowgirl_generation_safe"
+    elif missing_core and semantic_candidate:
+        classification = "semantic_cowgirl_core_controller_missing"
+    elif anchor_incomplete and semantic_candidate:
+        classification = "semantic_cowgirl_anchor_incomplete"
+    elif orientation_invalid and semantic_candidate:
+        classification = "semantic_cowgirl_orientation_invalid"
+    elif distance_invalid and semantic_candidate:
+        classification = "semantic_cowgirl_distance_invalid"
+    elif pose_invalid:
+        classification = "semantic_cowgirl_pose_invalid"
+    elif context_intro:
+        classification = "cowgirl_context_intro_low_motion"
+    elif bj_trap:
+        classification = "bj_oral_trap_negative"
+    elif standing:
+        classification = "standing_hand_head_negative"
+    elif receiver:
+        classification = "receiver_response_negative"
+    out = dict(v9)
+    out.update(
+        {
+            "final_semantic_cowgirl_score_v10": round(float(semantic), 6),
+            "final_clean_motion_score_v10": round(float(clean), 6),
+            "final_generation_candidate_score_v10": round(float(final_generation), 6),
+            "core_controller_gate": core_gate,
+            "cowgirl_core_controller_status": core_controllers.get("cowgirl_core_controller_status"),
+            "missing_core_controllers": missing_core_controllers,
+            "missing_core_pelvis_motion_controllers": missing_core,
+            "missing_hip_thigh_pelvis_controllers": bool(missing_core and ("thigh_controls" in missing_core_controllers or "hipControl_or_pelvisControl" in missing_core_controllers)),
+            "bj_oral_trap_flag": bj_trap,
+            "head_or_oral_domain_trap": bool(bj_oral_guard.get("head_or_oral_domain_trap")),
+            "cowgirl_pose_false_positive": bool(bj_oral_guard.get("cowgirl_pose_false_positive")),
+            "arm_stretch_outlier_flag": arm_stretch,
+            "hand_controller_outlier": bool(arm_stretch or v9.get("hand_controller_outlier")),
+            "arm_stretch_pose_invalid": arm_stretch,
+            "pose_validity": "valid" if generation_safe else "invalid" if pose_invalid or missing_core or bj_trap or arm_stretch else "unknown",
+            "generation_safe": generation_safe,
+            "semantic_cowgirl_candidate_v10": semantic_candidate,
+            "semantic_cowgirl_generation_safe": generation_safe,
+            "semantic_cowgirl_core_controller_missing": bool(missing_core and semantic_candidate),
+            "semantic_cowgirl_anchor_incomplete": bool(anchor_incomplete and semantic_candidate),
+            "semantic_cowgirl_orientation_invalid": bool(orientation_invalid and semantic_candidate),
+            "semantic_cowgirl_distance_invalid": bool(distance_invalid and semantic_candidate),
+            "semantic_cowgirl_pose_invalid": pose_invalid,
+            "bj_oral_trap_negative": bj_trap,
+            "standing_hand_head_negative": standing,
+            "standing_gesture_false_positive": standing,
+            "receiver_response_negative": receiver,
+            "unknown_or_unusable": bool(classification == "unknown_or_unusable" or export_unavailable),
+            "cowgirl_v10_category": classification,
+            "cowgirl_core_controller_requirements": core_controllers,
+            "bj_oral_trap_guard": bj_oral_guard,
+            "warning": "V10 blocks generation-safe Cowgirl on missing core controllers, BJ/oral traps, and hand/arm stretch outliers. It is not an ML label.",
+            "is_human_ground_truth": False,
+        }
+    )
+    return out
+
+
 def _write_report(rows: list[dict[str, Any]], report: str | Path) -> None:
     target = Path(report)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -1504,6 +1711,60 @@ def _write_report_v9(rows: list[dict[str, Any]], report: str | Path) -> None:
             f"distance={row.get('distance_validity_score')} outliers={row.get('outlier_controller_names')}"
         )
     if not distance_invalid:
+        lines.append("- None")
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_report_v10(rows: list[dict[str, Any]], report: str | Path) -> None:
+    target = Path(report)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    semantic = [r for r in rows if r.get("semantic_cowgirl_candidate_v10")]
+    generation = [r for r in rows if r.get("semantic_cowgirl_generation_safe")]
+    core_missing = [r for r in rows if r.get("semantic_cowgirl_core_controller_missing")]
+    traps = [r for r in rows if r.get("bj_oral_trap_negative")]
+    arm = [r for r in rows if r.get("arm_stretch_outlier_flag")]
+    category_counts = Counter(r.get("cowgirl_v10_category") for r in rows)
+    lines = [
+        "# Cowgirl Candidate Score V10 Report",
+        "",
+        "V10 adds core pelvis/hip controller requirements, BJ/oral trap blocking, and arm-stretch outlier blocking for generation-safe Cowgirl. These are audit scores, not labels.",
+        "",
+        f"- Windows scored: {len(rows)}",
+        f"- Semantic Cowgirl total: {len(semantic)}",
+        f"- Generation-safe Cowgirl total: {len(generation)}",
+        f"- Core-controller missing Cowgirl total: {len(core_missing)}",
+        f"- BJ/oral trap negatives: {len(traps)}",
+        f"- Arm-stretch outliers: {len(arm)}",
+        "",
+        "## V10 Categories",
+        "",
+    ]
+    lines.extend(f"- `{k}`: {v}" for k, v in category_counts.most_common()) if category_counts else lines.append("- None")
+    lines.extend(["", "## Top Generation-Safe Candidates", ""])
+    for row in sorted(generation, key=lambda r: float(r.get("final_generation_candidate_score_v10") or 0.0), reverse=True)[:25]:
+        lines.append(
+            f"- `{row.get('window_id')}` semantic={row.get('final_semantic_cowgirl_score_v10')} "
+            f"generation={row.get('final_generation_candidate_score_v10')} core={row.get('core_controller_gate')} "
+            f"scene=`{row.get('source_scene_file')}`"
+        )
+    if not generation:
+        lines.append("- None")
+    lines.extend(["", "## Core Missing / Review-006-Like Examples", ""])
+    for row in sorted(core_missing, key=lambda r: float(r.get("final_semantic_cowgirl_score_v10") or 0.0), reverse=True)[:25]:
+        lines.append(
+            f"- `{row.get('window_id')}` semantic={row.get('final_semantic_cowgirl_score_v10')} "
+            f"missing={row.get('missing_core_controllers')} arm_stretch={row.get('arm_stretch_outlier_flag')}"
+        )
+    if not core_missing:
+        lines.append("- None")
+    lines.extend(["", "## BJ/Oral Trap Candidates", ""])
+    for row in sorted(traps, key=lambda r: float((r.get("bj_oral_trap_guard") or {}).get("bj_oral_trap_confidence") or 0.0), reverse=True)[:25]:
+        guard = row.get("bj_oral_trap_guard") or {}
+        lines.append(
+            f"- `{row.get('window_id')}` confidence={guard.get('bj_oral_trap_confidence')} "
+            f"bj={guard.get('bj_reference_score')} head={guard.get('head_reference_score')} scene=`{row.get('source_scene_file')}`"
+        )
+    if not traps:
         lines.append("- None")
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
 

@@ -1053,13 +1053,25 @@ def _select_10_v10(data: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _select_10_candidate_db(data: dict[str, Any]) -> list[dict[str, Any]]:
-    quotas = {
-        "safe": 5,
-        "invalid": 2,
-        "context": 1,
-        "negative": 1,
-        "unknown": 1,
-    }
+    categories = {str(record.get("category") or "") for record in data.get("candidate_db", {}).values()}
+    use_v2 = bool({"semantic_cowgirl_core_controller_missing", "bj_oral_trap_negative"} & categories)
+    quotas = (
+        {
+            "safe": 6,
+            "core_missing": 1,
+            "bj_trap": 1,
+            "standing": 1,
+            "unknown": 1,
+        }
+        if use_v2
+        else {
+            "safe": 5,
+            "invalid": 2,
+            "context": 1,
+            "negative": 1,
+            "unknown": 1,
+        }
+    )
     pools = {key: [] for key in quotas}
     for wid, record in data.get("candidate_db", {}).items():
         category = str(record.get("category") or "unknown_or_unusable")
@@ -1075,16 +1087,32 @@ def _select_10_candidate_db(data: dict[str, Any]) -> list[dict[str, Any]]:
             why.append("invalidity: " + ", ".join(str(x) for x in invalidity))
         candidate = _candidate(category, wid, None, score, why, labels + list(invalidity))
         candidate["candidate_db_record"] = record
-        if category == "semantic_cowgirl_generation_safe":
-            pools["safe"].append(candidate)
-        elif category in {"semantic_cowgirl_pose_invalid", "semantic_cowgirl_distance_invalid", "semantic_cowgirl_anchor_incomplete", "semantic_cowgirl_orientation_invalid"}:
-            pools["invalid"].append(candidate)
-        elif category == "cowgirl_context_intro_low_motion":
-            pools["context"].append(candidate)
-        elif category in {"standing_hand_head_negative", "receiver_response_negative"}:
-            pools["negative"].append(candidate)
+        if use_v2:
+            if category == "semantic_cowgirl_generation_safe":
+                pools["safe"].append(candidate)
+            elif category == "semantic_cowgirl_core_controller_missing":
+                pools["core_missing"].append(candidate)
+            elif category == "bj_oral_trap_negative":
+                pools["bj_trap"].append(candidate)
+            elif category == "standing_hand_head_negative":
+                pools["standing"].append(candidate)
+            elif category in {"unknown_or_unusable", "export_unavailable_or_unsafe"}:
+                pools["unknown"].append(candidate)
+            elif category in {"semantic_cowgirl_pose_invalid", "semantic_cowgirl_distance_invalid", "semantic_cowgirl_anchor_incomplete", "semantic_cowgirl_orientation_invalid", "receiver_response_negative", "cowgirl_context_intro_low_motion"}:
+                pools["unknown"].append(candidate)
+            else:
+                pools["unknown"].append(candidate)
         else:
-            pools["unknown"].append(candidate)
+            if category == "semantic_cowgirl_generation_safe":
+                pools["safe"].append(candidate)
+            elif category in {"semantic_cowgirl_pose_invalid", "semantic_cowgirl_distance_invalid", "semantic_cowgirl_anchor_incomplete", "semantic_cowgirl_orientation_invalid"}:
+                pools["invalid"].append(candidate)
+            elif category == "cowgirl_context_intro_low_motion":
+                pools["context"].append(candidate)
+            elif category in {"standing_hand_head_negative", "receiver_response_negative"}:
+                pools["negative"].append(candidate)
+            else:
+                pools["unknown"].append(candidate)
     for rows in pools.values():
         _enrich_candidates(rows, data)
         rows.sort(key=lambda r: float(r.get("score") or 0.0), reverse=True)
@@ -1495,6 +1523,11 @@ def _semantic_guess(
         "candidate_db_category": candidate_db_record.get("category"),
         "candidate_db_generation_safe": candidate_db_record.get("generation_safe"),
         "candidate_db_invalidity_reasons": candidate_db_record.get("invalidity_reasons", []),
+        "candidate_db_invalidity_reason": candidate_db_record.get("invalidity_reason"),
+        "core_controller_gate": candidate_db_record.get("core_controller_gate"),
+        "missing_core_controllers": candidate_db_record.get("missing_core_controllers", []),
+        "bj_oral_trap_flag": bool(candidate_db_record.get("bj_oral_trap_flag")),
+        "arm_stretch_outlier_flag": bool(candidate_db_record.get("arm_stretch_outlier_flag")),
         "cowgirl_subtype": candidate_db_record.get("cowgirl_subtype"),
         "pose_anchor_completeness_score": cowgirl_score_v7.get("pose_anchor_completeness_score") or pose_anchor.get("pose_anchor_completeness_score"),
         "generation_pose_anchor_safe": cowgirl_score_v7.get("generation_pose_anchor_safe") if cowgirl_score_v7 else pose_anchor.get("generation_pose_anchor_safe"),
@@ -2086,6 +2119,10 @@ def _write_index_html(rows: list[dict[str, Any]], out: Path) -> None:
             f"<li>Candidate DB: {html.escape(str(guess.get('candidate_db_category')))} "
             f"(generation_safe={html.escape(str(guess.get('candidate_db_generation_safe')))}, subtype={html.escape(str(guess.get('cowgirl_subtype')))}, "
             f"invalidity={html.escape(str(guess.get('candidate_db_invalidity_reasons')))})</li>"
+            f"<li>Core/trap gates: core={html.escape(str(guess.get('core_controller_gate')))}, "
+            f"missing_core={html.escape(str(guess.get('missing_core_controllers')))}, "
+            f"bj_oral_trap={html.escape(str(guess.get('bj_oral_trap_flag')))}, "
+            f"arm_stretch={html.escape(str(guess.get('arm_stretch_outlier_flag')))}</li>"
             f"<li>Pose anchors: score={html.escape(str(guess.get('pose_anchor_completeness_score')))}, "
             f"foot_present={html.escape(str(guess.get('foot_controllers_present')))}, knee_present={html.escape(str(guess.get('knee_controllers_present')))}, "
             f"missing={html.escape(str(guess.get('missing_required_anchor_controllers')))}</li>"

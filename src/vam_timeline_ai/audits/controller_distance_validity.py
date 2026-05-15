@@ -99,11 +99,13 @@ def classify_controller_distance_validity(raw: dict[str, Any], thresholds: dict[
             _outlier_score(raw.get("left_hand_to_chest_distance_max"), thresholds["hand_to_chest_distance_max"]),
             _outlier_score(raw.get("left_hand_to_head_distance_max"), thresholds["hand_to_head_distance_max"]),
             _outlier_score(raw.get("left_hand_to_hip_distance_max"), thresholds["hand_to_hip_distance_max"]),
+            _outlier_score(raw.get("left_hand_to_elbow_distance_max"), thresholds["hand_to_elbow_distance_max"]),
         ),
         "right_hand": max(
             _outlier_score(raw.get("right_hand_to_chest_distance_max"), thresholds["hand_to_chest_distance_max"]),
             _outlier_score(raw.get("right_hand_to_head_distance_max"), thresholds["hand_to_head_distance_max"]),
             _outlier_score(raw.get("right_hand_to_hip_distance_max"), thresholds["hand_to_hip_distance_max"]),
+            _outlier_score(raw.get("right_hand_to_elbow_distance_max"), thresholds["hand_to_elbow_distance_max"]),
         ),
         "head_or_torso": max(
             _outlier_score(raw.get("head_to_chest_distance_max"), thresholds["head_to_chest_distance_max"]),
@@ -118,9 +120,10 @@ def classify_controller_distance_validity(raw: dict[str, Any], thresholds: dict[
     foot_outlier = "left_foot" in outliers or "right_foot" in outliers
     knee_outlier = "left_knee" in outliers or "right_knee" in outliers
     hand_outlier = "left_hand" in outliers or "right_hand" in outliers
+    arm_stretch_outlier = bool(hand_outlier and max(scores.get("left_hand", 0.0), scores.get("right_hand", 0.0)) >= 0.24)
     head_outlier = "head_or_torso" in outliers
     max_ratio = max([float(v) for v in scores.values() if np.isfinite(v)] or [0.0])
-    invalid = foot_outlier or knee_outlier or head_outlier or max_ratio >= 0.55
+    invalid = foot_outlier or knee_outlier or head_outlier or arm_stretch_outlier or max_ratio >= 0.55
     warning = bool(outliers)
     status = "invalid" if invalid else "warning" if warning else "valid"
     score = float(np.clip(1.0 - 0.45 * max_ratio - 0.10 * len(outliers), 0.0, 1.0))
@@ -135,6 +138,8 @@ def classify_controller_distance_validity(raw: dict[str, Any], thresholds: dict[
         warnings.append("Knee/leg-chain distance outlier detected.")
     if hand_outlier:
         warnings.append("Hand controller distance outlier detected.")
+    if arm_stretch_outlier:
+        warnings.append("Arm stretch outlier detected; hand controllers may be implausibly placed for generation.")
     if head_outlier:
         warnings.append("Head/torso distance outlier detected.")
 
@@ -147,12 +152,18 @@ def classify_controller_distance_validity(raw: dict[str, Any], thresholds: dict[
         "foot_distance_outlier": bool(foot_outlier),
         "knee_distance_outlier": bool(knee_outlier),
         "hand_distance_outlier": bool(hand_outlier),
+        "hand_controller_outlier": bool(hand_outlier),
+        "arm_stretch_outlier": bool(arm_stretch_outlier),
+        "arm_stretch_pose_invalid": bool(arm_stretch_outlier),
+        "arm_chain_plausibility_score": round(float(np.clip(1.0 - max(scores.get("left_hand", 0.0), scores.get("right_hand", 0.0)), 0.0, 1.0)), 6),
         "head_distance_outlier": bool(head_outlier),
         "max_bodypart_distance_ratio": round(float(max_ratio), 6),
         "foot_to_hip_distance_max_normalized": _json_float(raw.get("foot_to_hip_distance_max")),
         "foot_to_knee_distance_max_normalized": _json_float(raw.get("foot_to_knee_distance_max")),
         "hand_to_chest_distance_max_normalized": _json_float(raw.get("hand_to_chest_distance_max")),
         "hand_to_head_distance_max_normalized": _json_float(raw.get("hand_to_head_distance_max")),
+        "hand_to_hip_distance_max_normalized": _json_float(raw.get("hand_to_hip_distance_max")),
+        "hand_to_elbow_distance_max_normalized": _json_float(raw.get("hand_to_elbow_distance_max")),
         "warnings": _dedupe(warnings),
         "is_human_ground_truth": False,
         "is_training_label": False,
@@ -180,6 +191,7 @@ def _write_report(rows: list[dict[str, Any]], thresholds: dict[str, float], repo
     foot = sum(1 for r in rows if r.get("foot_distance_outlier"))
     knee = sum(1 for r in rows if r.get("knee_distance_outlier"))
     hand = sum(1 for r in rows if r.get("hand_distance_outlier"))
+    arm = sum(1 for r in rows if r.get("arm_stretch_outlier"))
     head = sum(1 for r in rows if r.get("head_distance_outlier"))
     lines = [
         "# Controller Distance Validity Report",
@@ -191,6 +203,7 @@ def _write_report(rows: list[dict[str, Any]], thresholds: dict[str, float], repo
         f"- Foot distance outliers: {foot}",
         f"- Knee distance outliers: {knee}",
         f"- Hand distance outliers: {hand}",
+        f"- Arm stretch outliers: {arm}",
         f"- Head/torso distance outliers: {head}",
         "",
         "## Distance Validity Status",

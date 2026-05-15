@@ -264,6 +264,24 @@ def build_parser() -> argparse.ArgumentParser:
     distance_validity.add_argument("--out-jsonl", required=True)
     distance_validity.add_argument("--report", required=True)
 
+    core_controllers = subparsers.add_parser("audit-cowgirl-core-controllers", help="Audit core hip/pelvis and lower-body controller requirements for Cowgirl generation safety.")
+    core_controllers.add_argument("--run-dir", required=True)
+    core_controllers.add_argument("--relative-index", required=True)
+    core_controllers.add_argument("--controller-map", required=True)
+    core_controllers.add_argument("--body-quality", required=True)
+    core_controllers.add_argument("--pose-anchor-completeness", required=True)
+    core_controllers.add_argument("--out-jsonl", required=True)
+    core_controllers.add_argument("--report", required=True)
+
+    bj_oral_guard = subparsers.add_parser("audit-bj-oral-trap-guard", help="Audit head/BJ/oral-domain trap candidates that should not be generation-safe Cowgirl.")
+    bj_oral_guard.add_argument("--run-dir", required=True)
+    bj_oral_guard.add_argument("--relative-features", required=True)
+    bj_oral_guard.add_argument("--trajectory-features", required=True)
+    bj_oral_guard.add_argument("--relative-reference-matches", required=True)
+    bj_oral_guard.add_argument("--cowgirl-core-controllers", required=True)
+    bj_oral_guard.add_argument("--out-jsonl", required=True)
+    bj_oral_guard.add_argument("--report", required=True)
+
     cowgirl_score_v5 = subparsers.add_parser("score-cowgirl-candidates-v5", help="Score semantic Cowgirl separately from generation/export usability.")
     cowgirl_score_v5.add_argument("--run-dir", required=True)
     cowgirl_score_v5.add_argument("--relative-reference-matches", required=True)
@@ -334,6 +352,24 @@ def build_parser() -> argparse.ArgumentParser:
     cowgirl_score_v9.add_argument("--out-jsonl", required=True)
     cowgirl_score_v9.add_argument("--report", required=True)
 
+    cowgirl_score_v10 = subparsers.add_parser("score-cowgirl-candidates-v10", help="Score Cowgirl candidates with core-controller and BJ/oral trap generation-safety gates.")
+    cowgirl_score_v10.add_argument("--run-dir", required=True)
+    cowgirl_score_v10.add_argument("--relative-reference-matches", required=True)
+    cowgirl_score_v10.add_argument("--relative-features", required=True)
+    cowgirl_score_v10.add_argument("--trajectory-features", required=True)
+    cowgirl_score_v10.add_argument("--body-quality", required=True)
+    cowgirl_score_v10.add_argument("--rider-receiver-scores", required=True)
+    cowgirl_score_v10.add_argument("--pose-export-validity", required=True)
+    cowgirl_score_v10.add_argument("--controller-validity", required=True)
+    cowgirl_score_v10.add_argument("--pose-anchor-completeness", required=True)
+    cowgirl_score_v10.add_argument("--controller-orientation-validity", required=True)
+    cowgirl_score_v10.add_argument("--controller-distance-validity", required=True)
+    cowgirl_score_v10.add_argument("--cowgirl-core-controllers", required=True)
+    cowgirl_score_v10.add_argument("--bj-oral-trap-guard", required=True)
+    cowgirl_score_v10.add_argument("--features", required=True)
+    cowgirl_score_v10.add_argument("--out-jsonl", required=True)
+    cowgirl_score_v10.add_argument("--report", required=True)
+
     candidate_db = subparsers.add_parser("build-cowgirl-candidate-db-v1", help="Build curated Cowgirl candidate inventory for review, not training.")
     candidate_db.add_argument("--run-dir", required=True)
     candidate_db.add_argument("--candidate-scores", required=True)
@@ -347,6 +383,22 @@ def build_parser() -> argparse.ArgumentParser:
     candidate_db.add_argument("--out-jsonl", required=True)
     candidate_db.add_argument("--out-csv", required=True)
     candidate_db.add_argument("--report", required=True)
+
+    candidate_db_v2 = subparsers.add_parser("build-cowgirl-candidate-db-v2", help="Build curated Cowgirl candidate inventory v2 with core/trap generation-safety gates.")
+    candidate_db_v2.add_argument("--run-dir", required=True)
+    candidate_db_v2.add_argument("--candidate-scores", required=True)
+    candidate_db_v2.add_argument("--relative-features", required=True)
+    candidate_db_v2.add_argument("--trajectory-features", required=True)
+    candidate_db_v2.add_argument("--body-quality", required=True)
+    candidate_db_v2.add_argument("--pose-anchor-completeness", required=True)
+    candidate_db_v2.add_argument("--controller-validity", required=True)
+    candidate_db_v2.add_argument("--controller-orientation-validity", required=True)
+    candidate_db_v2.add_argument("--controller-distance-validity", required=True)
+    candidate_db_v2.add_argument("--cowgirl-core-controllers", required=True)
+    candidate_db_v2.add_argument("--bj-oral-trap-guard", required=True)
+    candidate_db_v2.add_argument("--out-jsonl", required=True)
+    candidate_db_v2.add_argument("--out-csv", required=True)
+    candidate_db_v2.add_argument("--report", required=True)
 
     cmap = subparsers.add_parser("discover-controller-map", help="Discover controller names and conservative body-part mapping.")
     cmap.add_argument("--sample-index", required=True)
@@ -1063,6 +1115,47 @@ def cmd_audit_controller_distance_validity(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_audit_cowgirl_core_controllers(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.cowgirl_core_controller_requirements import audit_cowgirl_core_controllers
+
+    rows = audit_cowgirl_core_controllers(
+        args.run_dir,
+        args.relative_index,
+        args.controller_map,
+        args.body_quality,
+        args.pose_anchor_completeness,
+        args.out_jsonl,
+        args.report,
+    )
+    counts: dict[str, int] = {}
+    for row in rows:
+        key = str(row.get("cowgirl_core_controller_status"))
+        counts[key] = counts.get(key, 0) + 1
+    gate = sum(1 for row in rows if row.get("generation_safe_core_controller_gate") is True)
+    print(f"Cowgirl core controller audit written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; gate_pass: {gate}; status_counts: {counts}")
+    return 0
+
+
+def cmd_audit_bj_oral_trap_guard(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.bj_oral_trap_guard import audit_bj_oral_trap_guard
+
+    rows = audit_bj_oral_trap_guard(
+        args.run_dir,
+        args.relative_features,
+        args.trajectory_features,
+        args.relative_reference_matches,
+        args.cowgirl_core_controllers,
+        args.out_jsonl,
+        args.report,
+    )
+    traps = sum(1 for row in rows if row.get("head_or_oral_domain_trap"))
+    pose_false = sum(1 for row in rows if row.get("cowgirl_pose_false_positive"))
+    print(f"BJ/oral trap guard audit written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; traps: {traps}; cowgirl_pose_false_positive: {pose_false}")
+    return 0
+
+
 def cmd_score_cowgirl_candidates_v5(args: argparse.Namespace) -> int:
     from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_cowgirl_candidates_v5
 
@@ -1187,6 +1280,36 @@ def cmd_score_cowgirl_candidates_v9(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_score_cowgirl_candidates_v10(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_cowgirl_candidates_v10
+
+    rows = score_cowgirl_candidates_v10(
+        args.run_dir,
+        args.relative_reference_matches,
+        args.relative_features,
+        args.trajectory_features,
+        args.body_quality,
+        args.rider_receiver_scores,
+        args.pose_export_validity,
+        args.controller_validity,
+        args.pose_anchor_completeness,
+        args.controller_orientation_validity,
+        args.controller_distance_validity,
+        args.cowgirl_core_controllers,
+        args.bj_oral_trap_guard,
+        args.features,
+        args.out_jsonl,
+        args.report,
+    )
+    semantic = sum(1 for row in rows if row.get("semantic_cowgirl_candidate_v10"))
+    generation = sum(1 for row in rows if row.get("semantic_cowgirl_generation_safe"))
+    core_missing = sum(1 for row in rows if row.get("semantic_cowgirl_core_controller_missing"))
+    traps = sum(1 for row in rows if row.get("bj_oral_trap_negative"))
+    print(f"Cowgirl candidate scores v10 written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; semantic: {semantic}; generation_safe: {generation}; core_missing: {core_missing}; bj_oral_traps: {traps}")
+    return 0
+
+
 def cmd_build_cowgirl_candidate_db_v1(args: argparse.Namespace) -> int:
     from vam_timeline_ai.datasets.cowgirl_candidate_database import build_cowgirl_candidate_db_v1
 
@@ -1207,6 +1330,33 @@ def cmd_build_cowgirl_candidate_db_v1(args: argparse.Namespace) -> int:
     generation = sum(1 for row in rows if row.get("category") == "semantic_cowgirl_generation_safe")
     print(f"Cowgirl candidate DB v1 written: {args.out_jsonl}")
     print(f"Rows: {len(rows)}; generation_safe: {generation}")
+    return 0
+
+
+def cmd_build_cowgirl_candidate_db_v2(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.datasets.cowgirl_candidate_database import build_cowgirl_candidate_db_v2
+
+    rows = build_cowgirl_candidate_db_v2(
+        args.run_dir,
+        args.candidate_scores,
+        args.relative_features,
+        args.trajectory_features,
+        args.body_quality,
+        args.pose_anchor_completeness,
+        args.controller_validity,
+        args.controller_orientation_validity,
+        args.controller_distance_validity,
+        args.cowgirl_core_controllers,
+        args.bj_oral_trap_guard,
+        args.out_jsonl,
+        args.out_csv,
+        args.report,
+    )
+    generation = sum(1 for row in rows if row.get("category") == "semantic_cowgirl_generation_safe")
+    core_missing = sum(1 for row in rows if row.get("category") == "semantic_cowgirl_core_controller_missing")
+    traps = sum(1 for row in rows if row.get("category") == "bj_oral_trap_negative")
+    print(f"Cowgirl candidate DB v2 written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; generation_safe: {generation}; core_missing: {core_missing}; bj_oral_traps: {traps}")
     return 0
 
 
@@ -1905,6 +2055,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_audit_controller_orientation_validity(args)
     if args.command == "audit-controller-distance-validity":
         return cmd_audit_controller_distance_validity(args)
+    if args.command == "audit-cowgirl-core-controllers":
+        return cmd_audit_cowgirl_core_controllers(args)
+    if args.command == "audit-bj-oral-trap-guard":
+        return cmd_audit_bj_oral_trap_guard(args)
     if args.command == "score-cowgirl-candidates-v5":
         return cmd_score_cowgirl_candidates_v5(args)
     if args.command == "score-cowgirl-candidates-v6":
@@ -1915,8 +2069,12 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_score_cowgirl_candidates_v8(args)
     if args.command == "score-cowgirl-candidates-v9":
         return cmd_score_cowgirl_candidates_v9(args)
+    if args.command == "score-cowgirl-candidates-v10":
+        return cmd_score_cowgirl_candidates_v10(args)
     if args.command == "build-cowgirl-candidate-db-v1":
         return cmd_build_cowgirl_candidate_db_v1(args)
+    if args.command == "build-cowgirl-candidate-db-v2":
+        return cmd_build_cowgirl_candidate_db_v2(args)
     if args.command == "discover-controller-map":
         return cmd_discover_controller_map(args)
     if args.command == "extract-cowgirl-features-v1":

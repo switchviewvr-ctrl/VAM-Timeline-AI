@@ -7,16 +7,18 @@ from vam_timeline_ai.audits.pose_export_validity import pose_export_validity_for
 from vam_timeline_ai.audits.controller_validity import controller_validity_for_arrays
 from vam_timeline_ai.audits.controller_orientation_validity import controller_orientation_validity_for_arrays
 from vam_timeline_ai.audits.controller_distance_validity import controller_distance_validity_for_arrays
+from vam_timeline_ai.audits.cowgirl_core_controller_requirements import cowgirl_core_controller_requirements_for_parts
 from vam_timeline_ai.audits.pose_anchor_completeness import pose_anchor_completeness_for_parts
 from vam_timeline_ai.audits.semantic_review import _filter_safe_export_controllers
-from vam_timeline_ai.datasets.cowgirl_candidate_database import build_cowgirl_candidate_db_v1
+from vam_timeline_ai.datasets.cowgirl_candidate_database import build_cowgirl_candidate_db_v1, build_cowgirl_candidate_db_v2
 from vam_timeline_ai.features.relative_features import relative_features_from_arrays
 from vam_timeline_ai.features.trajectory_shape import trajectory_shape_for_points
 from vam_timeline_ai.io.json_utils import load_jsonl, write_jsonl
 from vam_timeline_ai.motion.coordinate_spaces import can_use_for_final_export, is_allowed_body_controller_track, is_disallowed_world_or_root_track
 from vam_timeline_ai.motion.relative_motion import build_relative_motion_window_row
 from vam_timeline_ai.references.relative_matcher import compare_relative_wild_to_handmade
-from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_window_v4, score_window_v5, score_window_v6, score_window_v7, score_window_v8, score_window_v9
+from vam_timeline_ai.semantics.bj_oral_trap_guard import bj_oral_trap_guard_for_window
+from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_window_v4, score_window_v5, score_window_v6, score_window_v7, score_window_v8, score_window_v9, score_window_v10
 
 
 def _times(n=121):
@@ -845,3 +847,173 @@ def test_semantic_review_v11_uses_candidate_db_categories(tmp_path):
     assert "semantic_cowgirl_distance_invalid" in categories or "semantic_cowgirl_anchor_incomplete" in categories
     assert "cowgirl_candidate_db_record" in rows[0]["evidence"]
     assert rows[0]["system_semantic_guess"]["candidate_db_category"] is not None
+
+
+def test_core_controller_gate_rejects_hand_head_only_false_positive():
+    row = cowgirl_core_controller_requirements_for_parts(["head", "left_hand", "right_hand"], ["headControl", "lHandControl", "rHandControl"])
+    assert row["cowgirl_core_controller_status"] == "missing_core"
+    assert row["generation_safe_core_controller_gate"] is False
+    assert "hipControl_or_pelvisControl" in row["missing_core_controllers"]
+
+
+def test_core_controller_gate_passes_hip_pelvis_candidate():
+    row = cowgirl_core_controller_requirements_for_parts(
+        ["hip", "chest", "left_knee", "right_knee", "left_foot", "right_foot", "left_thigh", "right_thigh"],
+        ["hipControl", "chestControl", "lKneeControl", "rKneeControl", "lFootControl", "rFootControl", "lThighControl", "rThighControl"],
+        core_motion_amplitude=0.08,
+    )
+    assert row["cowgirl_core_controller_status"] == "complete"
+    assert row["generation_safe_core_controller_gate"] is True
+
+
+def test_bj_oral_trap_guard_detects_head_dominant_cowgirl_pose_trap():
+    row = bj_oral_trap_guard_for_window(
+        {"window_id": "win", "feature_values": {"head_relative_to_chest_motion": 0.6, "relative_pelvis_vertical_amplitude": 0.02, "local_grind_score": 0.01}},
+        {"window_id": "win", "trajectory_shape_classification": "unknown"},
+        {"window_id": "win", "bj_relative_score": 0.62, "head_relative_score": 0.58, "cowgirl_relative_score": 0.42},
+        {"window_id": "win", "generation_safe_core_controller_gate": False, "cowgirl_core_controller_status": "missing_core"},
+    )
+    assert row["head_or_oral_domain_trap"]
+    assert row["cowgirl_pose_false_positive"]
+    assert row["likely_bj_or_oral_motion"]
+
+
+def test_hand_arm_stretch_outlier_detected():
+    n = 20
+    hip = np.zeros((n, 3), dtype=np.float32)
+    chest = np.tile(np.array([0.0, 0.55, 0.0], dtype=np.float32), (n, 1))
+    head = np.tile(np.array([0.0, 0.9, 0.0], dtype=np.float32), (n, 1))
+    elbow = np.tile(np.array([0.35, 0.45, 0.0], dtype=np.float32), (n, 1))
+    hand = np.tile(np.array([3.5, 2.5, 0.0], dtype=np.float32), (n, 1))
+    positions = np.stack([hip, chest, head, elbow, hand], axis=1)
+    row = controller_distance_validity_for_arrays(positions, ["hip", "chest", "head", "left_elbow", "left_hand"], ["hipControl", "chestControl", "headControl", "lElbowControl", "lHandControl"], scale=1.0, row={"window_id": "win"})
+    assert row["hand_controller_outlier"]
+    assert row["arm_stretch_outlier"]
+    assert row["controller_distance_validity_status"] == "invalid"
+
+
+def test_cowgirl_v10_blocks_generation_safe_when_core_missing():
+    row = score_window_v10(
+        {"window_id": "win", "sample_id": "sample", "source_id": "src", "feature_values": {}},
+        {"body_motion_quality": "good_body_motion"},
+        {"cowgirl_relative_score": 0.9, "cowgirl_grind_trajectory_score": 0.85, "safe_for_learning": True},
+        {"feature_values": {"safe_for_learning": 1.0, "local_path_length": 1.0, "local_motion_energy": 1.0}, "feature_quality": {"teleport_risk": "low"}},
+        {"trajectory_shape_classification": "oval_grind", "feature_values": {"oval_path_score": 0.85, "ellipse_fit_score": 0.8, "closed_loop_ratio": 0.75, "grind_pattern_score": 0.85, "jitter_score": 0.05, "transition_path_score": 0.05}},
+        {"duration_seconds": 4.0},
+        {"rider_receiver_status": "likely_active_rider", "active_rider_score": 0.85, "receiver_body_response_score": 0.05},
+        {"export_pose_validity": "good", "generation_template_safe": True, "motion_strength_score": 0.9, "semantic_motion_likely_valid": True},
+        {"controller_validity_status": "valid", "controller_validity_score": 0.95, "generation_pose_valid": True},
+        {"pose_anchor_completeness_score": 1.0, "generation_pose_anchor_safe": True, "missing_foot_controllers": False, "missing_knee_controllers": False, "pose_anchor_incomplete": False, "foot_controllers_present": True, "knee_controllers_present": True},
+        {"orientation_validity_status": "valid", "orientation_validity_score": 0.95},
+        {"controller_distance_validity_status": "valid", "controller_distance_validity_score": 0.95},
+        {"generation_safe_core_controller_gate": False, "cowgirl_core_controller_status": "missing_core", "missing_core_controllers": ["hipControl_or_pelvisControl"]},
+        {},
+    )
+    assert row["final_semantic_cowgirl_score_v10"] >= 0.5
+    assert row["final_generation_candidate_score_v10"] == 0.0
+    assert row["semantic_cowgirl_core_controller_missing"]
+    assert row["cowgirl_v10_category"] == "semantic_cowgirl_core_controller_missing"
+
+
+def test_cowgirl_v10_blocks_generation_safe_on_bj_oral_trap():
+    row = score_window_v10(
+        {"window_id": "win", "sample_id": "sample", "source_id": "src", "feature_values": {}},
+        {"body_motion_quality": "good_body_motion"},
+        {"cowgirl_relative_score": 0.8, "cowgirl_grind_trajectory_score": 0.75, "safe_for_learning": True},
+        {"feature_values": {"safe_for_learning": 1.0, "local_path_length": 1.0, "local_motion_energy": 1.0}, "feature_quality": {"teleport_risk": "low"}},
+        {"trajectory_shape_classification": "oval_grind", "feature_values": {"oval_path_score": 0.8, "ellipse_fit_score": 0.8, "closed_loop_ratio": 0.7, "grind_pattern_score": 0.8, "jitter_score": 0.05, "transition_path_score": 0.05}},
+        {"duration_seconds": 4.0},
+        {"rider_receiver_status": "likely_active_rider", "active_rider_score": 0.8, "receiver_body_response_score": 0.05},
+        {"export_pose_validity": "good", "generation_template_safe": True, "motion_strength_score": 0.9, "semantic_motion_likely_valid": True},
+        {"controller_validity_status": "valid", "controller_validity_score": 0.95, "generation_pose_valid": True},
+        {"pose_anchor_completeness_score": 1.0, "generation_pose_anchor_safe": True, "missing_foot_controllers": False, "missing_knee_controllers": False, "pose_anchor_incomplete": False, "foot_controllers_present": True, "knee_controllers_present": True},
+        {"orientation_validity_status": "valid", "orientation_validity_score": 0.95},
+        {"controller_distance_validity_status": "valid", "controller_distance_validity_score": 0.95},
+        {"generation_safe_core_controller_gate": True, "cowgirl_core_controller_status": "complete"},
+        {"head_or_oral_domain_trap": True, "cowgirl_pose_false_positive": True},
+    )
+    assert row["final_generation_candidate_score_v10"] == 0.0
+    assert row["bj_oral_trap_negative"]
+    assert row["cowgirl_v10_category"] == "bj_oral_trap_negative"
+
+
+def test_candidate_db_v2_categories_include_core_missing_and_bj_trap(tmp_path):
+    from tests.test_semantic_review import _make_run
+
+    run = _make_run(tmp_path)
+    (run / "datasets").mkdir(parents=True, exist_ok=True)
+    rows = [
+        {"window_id": "win_00", "sample_id": "s0", "final_semantic_cowgirl_score_v10": 0.9, "final_clean_motion_score_v10": 0.8, "final_generation_candidate_score_v10": 0.7, "cowgirl_v10_category": "semantic_cowgirl_generation_safe", "semantic_cowgirl_generation_safe": True, "core_controller_gate": True, "trajectory_shape_classification": "oval_grind"},
+        {"window_id": "win_01", "sample_id": "s1", "final_semantic_cowgirl_score_v10": 0.8, "final_clean_motion_score_v10": 0.7, "final_generation_candidate_score_v10": 0.0, "cowgirl_v10_category": "semantic_cowgirl_core_controller_missing", "semantic_cowgirl_core_controller_missing": True, "missing_core_controllers": ["hipControl_or_pelvisControl"], "trajectory_shape_classification": "oval_grind"},
+        {"window_id": "win_02", "sample_id": "s2", "final_semantic_cowgirl_score_v10": 0.1, "final_clean_motion_score_v10": 0.1, "final_generation_candidate_score_v10": 0.0, "cowgirl_v10_category": "bj_oral_trap_negative", "bj_oral_trap_flag": True, "trajectory_shape_classification": "unknown"},
+    ]
+    write_jsonl(run / "audits" / "cowgirl_candidate_scores_v10.jsonl", rows)
+    for name in ["relative_motion_features.jsonl", "trajectory_shape_features.jsonl"]:
+        write_jsonl(run / "relative_motion" / name, [{"window_id": f"win_0{i}", "feature_values": {"safe_for_learning": 1.0}, "trajectory_shape_classification": "oval_grind"} for i in range(3)])
+    for path in ["body_motion_quality.jsonl", "pose_anchor_completeness.jsonl", "controller_validity.jsonl", "controller_orientation_validity.jsonl", "controller_distance_validity.jsonl", "cowgirl_core_controller_requirements.jsonl", "bj_oral_trap_guard.jsonl"]:
+        write_jsonl(run / "audits" / path, [{"window_id": f"win_0{i}"} for i in range(3)])
+    db = build_cowgirl_candidate_db_v2(
+        run,
+        run / "audits" / "cowgirl_candidate_scores_v10.jsonl",
+        run / "relative_motion" / "relative_motion_features.jsonl",
+        run / "relative_motion" / "trajectory_shape_features.jsonl",
+        run / "audits" / "body_motion_quality.jsonl",
+        run / "audits" / "pose_anchor_completeness.jsonl",
+        run / "audits" / "controller_validity.jsonl",
+        run / "audits" / "controller_orientation_validity.jsonl",
+        run / "audits" / "controller_distance_validity.jsonl",
+        run / "audits" / "cowgirl_core_controller_requirements.jsonl",
+        run / "audits" / "bj_oral_trap_guard.jsonl",
+        run / "datasets" / "cowgirl_candidate_db_v2.jsonl",
+        run / "datasets" / "cowgirl_candidate_db_v2.csv",
+        run / "datasets" / "cowgirl_candidate_db_v2_report.md",
+    )
+    categories = {r["category"] for r in db}
+    assert "semantic_cowgirl_core_controller_missing" in categories
+    assert "bj_oral_trap_negative" in categories
+
+
+def test_semantic_review_v12_uses_db_v2_categories(tmp_path):
+    from tests.test_semantic_review import _make_run
+
+    run = _make_run(tmp_path)
+    (run / "datasets").mkdir(parents=True, exist_ok=True)
+    cats = [
+        "semantic_cowgirl_generation_safe",
+        "semantic_cowgirl_generation_safe",
+        "semantic_cowgirl_generation_safe",
+        "semantic_cowgirl_generation_safe",
+        "semantic_cowgirl_generation_safe",
+        "semantic_cowgirl_generation_safe",
+        "semantic_cowgirl_core_controller_missing",
+        "bj_oral_trap_negative",
+        "standing_hand_head_negative",
+        "unknown_or_unusable",
+        "receiver_response_negative",
+    ]
+    db_rows = []
+    for idx, cat in enumerate(cats):
+        db_rows.append({
+            "window_id": f"win_{idx:02d}",
+            "sample_id": f"sample_{idx % 4}",
+            "category": cat,
+            "semantic_cowgirl_score": 0.9 - idx * 0.02,
+            "clean_motion_score": 0.8,
+            "generation_candidate_score": 0.7 if cat == "semantic_cowgirl_generation_safe" else 0.0,
+            "cowgirl_subtype": "oval_grind",
+            "generation_safe": cat == "semantic_cowgirl_generation_safe",
+            "core_controller_gate": cat == "semantic_cowgirl_generation_safe",
+            "missing_core_controllers": ["hipControl_or_pelvisControl"] if cat == "semantic_cowgirl_core_controller_missing" else [],
+            "bj_oral_trap_flag": cat == "bj_oral_trap_negative",
+            "arm_stretch_outlier_flag": False,
+            "invalidity_reasons": ["head_or_oral_domain_trap"] if cat == "bj_oral_trap_negative" else [],
+        })
+    write_jsonl(run / "datasets" / "cowgirl_candidate_db_v2.jsonl", db_rows)
+    out = run / "audits" / "semantic_review_010_v12"
+    export_semantic_review_010(run, out, count=10, attempt_timeline_export=False, candidate_db=run / "datasets" / "cowgirl_candidate_db_v2.jsonl", use_cowgirl_candidate_db=True)
+    rows = load_jsonl(out / "semantic_review_010.jsonl")
+    categories = {r["category"] for r in rows}
+    assert "semantic_cowgirl_generation_safe" in categories
+    assert "semantic_cowgirl_core_controller_missing" in categories
+    assert "bj_oral_trap_negative" in categories
+    assert rows[0]["system_semantic_guess"]["core_controller_gate"] is not None

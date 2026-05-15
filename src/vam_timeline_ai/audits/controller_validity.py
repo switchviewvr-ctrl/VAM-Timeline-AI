@@ -39,6 +39,7 @@ DEFAULT_THRESHOLDS = {
     "hand_to_chest_distance_max": 2.10,
     "hand_to_head_distance_max": 2.20,
     "hand_to_hip_distance_max": 2.25,
+    "hand_to_elbow_distance_max": 1.15,
     "head_to_chest_distance_max": 1.20,
     "chest_to_hip_distance_max": 1.35,
 }
@@ -348,6 +349,8 @@ def _metrics_from_arrays(positions: np.ndarray, bodyparts: list[str], names: lis
         "right_hand_to_head": (RIGHT_HAND_PARTS, HEAD_PARTS),
         "left_hand_to_hip": (LEFT_HAND_PARTS, HIP_PARTS),
         "right_hand_to_hip": (RIGHT_HAND_PARTS, HIP_PARTS),
+        "left_hand_to_elbow": (LEFT_HAND_PARTS, LEFT_ELBOW_PARTS),
+        "right_hand_to_elbow": (RIGHT_HAND_PARTS, RIGHT_ELBOW_PARTS),
         "head_to_chest": (HEAD_PARTS, CHEST_PARTS),
         "chest_to_hip": (CHEST_PARTS, HIP_PARTS),
     }
@@ -369,6 +372,8 @@ def _metrics_from_arrays(positions: np.ndarray, bodyparts: list[str], names: lis
     metrics["hand_to_head_distance_max"] = _json_float(_nanmax([metrics.get("left_hand_to_head_distance_max"), metrics.get("right_hand_to_head_distance_max")]))
     metrics["hand_to_hip_distance_mean"] = _json_float(_nanmean([metrics.get("left_hand_to_hip_distance_mean"), metrics.get("right_hand_to_hip_distance_mean")]))
     metrics["hand_to_hip_distance_max"] = _json_float(_nanmax([metrics.get("left_hand_to_hip_distance_max"), metrics.get("right_hand_to_hip_distance_max")]))
+    metrics["hand_to_elbow_distance_mean"] = _json_float(_nanmean([metrics.get("left_hand_to_elbow_distance_mean"), metrics.get("right_hand_to_elbow_distance_mean")]))
+    metrics["hand_to_elbow_distance_max"] = _json_float(_nanmax([metrics.get("left_hand_to_elbow_distance_max"), metrics.get("right_hand_to_elbow_distance_max")]))
     return metrics
 
 
