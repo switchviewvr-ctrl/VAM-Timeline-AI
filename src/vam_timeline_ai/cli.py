@@ -285,6 +285,62 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--schema", required=True)
     ingest.add_argument("--stop-if-missing", default="true")
 
+    machine = subparsers.add_parser("generate-machine-label-proposals-v1", help="Generate machine semantic label proposals from numeric proxies.")
+    machine.add_argument("--run-dir", required=True)
+    machine.add_argument("--features", required=True)
+    machine.add_argument("--pair-features", required=True)
+    machine.add_argument("--weak-labels", required=True)
+    machine.add_argument("--windows", required=True)
+    machine.add_argument("--pair-windows", required=True)
+    machine.add_argument("--out-jsonl", required=True)
+    machine.add_argument("--out-yaml", required=True)
+    machine.add_argument("--report", required=True)
+
+    silver = subparsers.add_parser("build-silver-labels-v1", help="Build high-confidence silver labels from machine proposals.")
+    silver.add_argument("--proposals", required=True)
+    silver.add_argument("--out-jsonl", required=True)
+    silver.add_argument("--out-yaml", required=True)
+    silver.add_argument("--report", required=True)
+    silver.add_argument("--min-confidence", type=float, default=0.75)
+
+    compare = subparsers.add_parser("compare-machine-labels-to-manual", help="Compare silver labels to real manual labels if any exist.")
+    compare.add_argument("--manual-labels", required=True)
+    compare.add_argument("--silver-labels", required=True)
+    compare.add_argument("--out", required=True)
+
+    dsv3 = subparsers.add_parser("build-ml-dataset-v3", help="Build ML dataset v3 with manual, weak, and silver labels separated.")
+    dsv3.add_argument("--features", required=True)
+    dsv3.add_argument("--windows", required=True)
+    dsv3.add_argument("--weak-labels", required=True)
+    dsv3.add_argument("--manual-labels", required=True)
+    dsv3.add_argument("--silver-labels", required=True)
+    dsv3.add_argument("--out", required=True)
+    dsv3.add_argument("--report", required=True)
+
+    silver_ready = subparsers.add_parser("analyze-silver-readiness", help="Analyze readiness for silver-supervised proxy baselines.")
+    silver_ready.add_argument("--dataset", required=True)
+    silver_ready.add_argument("--silver-labels", required=True)
+    silver_ready.add_argument("--out", required=True)
+
+    silver_baseline = subparsers.add_parser("train-silver-baseline-v0", help="Train weak-supervised silver proxy baseline if possible.")
+    silver_baseline.add_argument("--dataset", required=True)
+    silver_baseline.add_argument("--out-dir", required=True)
+    silver_baseline.add_argument("--report", required=True)
+
+    machine_batch = subparsers.add_parser("build-machine-proposal-review-batch", help="Build review batch focused on checking machine proposals.")
+    machine_batch.add_argument("--run-dir", required=True)
+    machine_batch.add_argument("--proposals", required=True)
+    machine_batch.add_argument("--silver-labels", required=True)
+    machine_batch.add_argument("--out-dir", required=True)
+    machine_batch.add_argument("--batch-size", type=int, default=120)
+    machine_batch.add_argument("--max-per-scene", type=int, default=15)
+    machine_batch.add_argument("--max-per-sample", type=int, default=3)
+
+    run_machine = subparsers.add_parser("run-machine-labeling-v1", help="Run machine proposal, silver label, dataset v3, and review batch workflow.")
+    run_machine.add_argument("--run-dir", required=True)
+    run_machine.add_argument("--min-silver-confidence", type=float, default=0.75)
+    run_machine.add_argument("--train-silver-baseline", default="true")
+
     return parser
 
 
@@ -763,6 +819,97 @@ def cmd_ingest_latest_edited_batch(args: argparse.Namespace) -> int:
     return 0 if result["status"] in {"waiting_for_human_labels", "ingested", "no_valid_batch"} else 1
 
 
+def cmd_generate_machine_label_proposals_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.machine_label_proposals import generate_machine_label_proposals_v1
+
+    rows = generate_machine_label_proposals_v1(
+        args.run_dir,
+        args.features,
+        args.pair_features,
+        args.weak_labels,
+        args.windows,
+        args.pair_windows,
+        args.out_jsonl,
+        args.out_yaml,
+        args.report,
+    )
+    print(f"Machine label proposals written: {args.out_jsonl}")
+    print(f"Proposals: {len(rows)}")
+    return 0
+
+
+def cmd_build_silver_labels_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.silver_labels import build_silver_labels_v1
+
+    rows = build_silver_labels_v1(args.proposals, args.out_jsonl, args.out_yaml, args.report, min_confidence=args.min_confidence)
+    print(f"Silver labels written: {args.out_jsonl}")
+    print(f"Silver records: {len(rows)}")
+    return 0
+
+
+def cmd_compare_machine_labels_to_manual(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.label_comparison import compare_machine_labels_to_manual
+
+    summary = compare_machine_labels_to_manual(args.manual_labels, args.silver_labels, args.out)
+    print(f"Machine/manual comparison written: {args.out}")
+    print(f"Status: {summary['status']}; overlap={summary['overlap_windows']}")
+    return 0
+
+
+def cmd_build_ml_dataset_v3(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.ml.dataset_v3 import build_ml_dataset_v3
+
+    summary = build_ml_dataset_v3(args.features, args.windows, args.weak_labels, args.manual_labels, args.silver_labels, args.out, args.report)
+    print(f"ML dataset v3 written: {args.out}")
+    print(f"Shape: {summary['shape']}; silver labels: {summary['silver_label_count']}")
+    return 0
+
+
+def cmd_analyze_silver_readiness(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.ml.silver_readiness import analyze_silver_readiness
+
+    summary = analyze_silver_readiness(args.dataset, args.silver_labels, args.out)
+    print(f"Silver readiness report written: {args.out}")
+    print(f"Eligible proxy labels: {summary['eligible_labels'] or 'None'}")
+    return 0
+
+
+def cmd_train_silver_baseline_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.ml.silver_baseline import train_silver_baseline_v0
+
+    summary = train_silver_baseline_v0(args.dataset, args.out_dir, args.report)
+    print(f"Silver baseline report written: {args.report}")
+    print(f"Trained: {summary['trained']}; reason: {summary['reason']}")
+    return 0
+
+
+def cmd_build_machine_proposal_review_batch(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.machine_proposal_review_batch import build_machine_proposal_review_batch
+
+    rows = build_machine_proposal_review_batch(
+        args.run_dir,
+        args.proposals,
+        args.silver_labels,
+        args.out_dir,
+        batch_size=args.batch_size,
+        max_per_scene=args.max_per_scene,
+        max_per_sample=args.max_per_sample,
+    )
+    print(f"Machine proposal review batch written: {args.out_dir}")
+    print(f"Review items: {len(rows)}")
+    return 0
+
+
+def cmd_run_machine_labeling_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.machine_labeling_v1 import run_machine_labeling_v1
+
+    summary = run_machine_labeling_v1(args.run_dir, args.min_silver_confidence, train_silver_baseline=_arg_bool(args.train_silver_baseline))
+    print(f"Machine labeling v1 status: {summary['status']}")
+    print(f"Proposals: {summary.get('proposal_count', 0)}; silver records: {summary.get('silver_record_count', 0)}")
+    print(f"Manual labels modified: {summary.get('manual_labels_modified', False)}")
+    return 0 if summary["status"] == "ok" else 1
+
+
 def _arg_bool(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
@@ -881,6 +1028,22 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_write_labeling_next_step(args)
     if args.command == "ingest-latest-edited-batch":
         return cmd_ingest_latest_edited_batch(args)
+    if args.command == "generate-machine-label-proposals-v1":
+        return cmd_generate_machine_label_proposals_v1(args)
+    if args.command == "build-silver-labels-v1":
+        return cmd_build_silver_labels_v1(args)
+    if args.command == "compare-machine-labels-to-manual":
+        return cmd_compare_machine_labels_to_manual(args)
+    if args.command == "build-ml-dataset-v3":
+        return cmd_build_ml_dataset_v3(args)
+    if args.command == "analyze-silver-readiness":
+        return cmd_analyze_silver_readiness(args)
+    if args.command == "train-silver-baseline-v0":
+        return cmd_train_silver_baseline_v0(args)
+    if args.command == "build-machine-proposal-review-batch":
+        return cmd_build_machine_proposal_review_batch(args)
+    if args.command == "run-machine-labeling-v1":
+        return cmd_run_machine_labeling_v1(args)
     parser.error(f"Unknown command: {args.command}")
     return 2
 

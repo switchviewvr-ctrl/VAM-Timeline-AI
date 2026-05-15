@@ -174,6 +174,9 @@ def _metadata(row: dict[str, Any], sample: dict[str, Any] | None, mappings: dict
         "technical_atom_id": row.get("technical_atom_id"),
         "time_range": [row.get("start_seconds"), row.get("end_seconds")],
         "weak_labels_v2": row.get("weak_labels_v2", []),
+        "machine_proposals": row.get("machine_proposals", []),
+        "silver_labels": row.get("silver_labels", {}),
+        "machine_label_warning": row.get("machine_label_warning"),
         "top_features": row.get("top_features", {}),
         "mapped_controllers": mapped,
         "warnings": warnings,
@@ -212,6 +215,14 @@ def _write_index(rows: list[dict[str, Any]], out: Path, manifest: list[dict[str,
             if (out / safe / name).exists():
                 image_tags.append(f'<img src="{safe}/{name}" alt="{name}" style="max-width:420px">')
         yaml_block = html.escape(_stub_for(row))
+        machine = ", ".join(
+            f"{item.get('label','')} ({item.get('confidence','')})"
+            for item in row.get("machine_proposals", [])[:8]
+        )
+        silver = row.get("silver_labels", {}) or {}
+        silver_text = ", ".join(
+            [*(silver.get("positive_labels", []) or []), *(silver.get("role_candidates", []) or []), *(silver.get("contact_candidates", []) or [])]
+        )
         cards.append(
             f"<section><h2>{html.escape(str(row.get('review_id')))}</h2>"
             f"<p><b>Window:</b> {html.escape(str(row.get('window_id')))}<br>"
@@ -219,6 +230,9 @@ def _write_index(rows: list[dict[str, Any]], out: Path, manifest: list[dict[str,
             f"<b>Atom:</b> {html.escape(str(row.get('technical_atom_id')))}<br>"
             f"<b>Time:</b> {row.get('start_seconds')} - {row.get('end_seconds')}</p>"
             f"<p><b>Weak hints:</b> {html.escape(', '.join(item.get('label','') for item in row.get('weak_labels_v2', [])[:8]))}</p>"
+            f"<p><b>Machine proposals:</b> {html.escape(machine)}<br>"
+            f"<b>Silver hints:</b> {html.escape(silver_text)}<br>"
+            f"<b>Warning:</b> {html.escape(str(row.get('machine_label_warning') or 'Hints are not human truth.'))}</p>"
             + "".join(image_tags)
             + f"<pre>{yaml_block}</pre></section>"
         )

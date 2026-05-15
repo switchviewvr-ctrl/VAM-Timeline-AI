@@ -125,6 +125,30 @@ This project is preparing that semantic database foundation. It does not impleme
 9. Text prompt to semantic motion plan
 10. VaM Timeline export / bridge playback / ML later
 
+## Machine Label Proposals / Silver Labels
+
+Codex can generate automated label proposals from numeric movement features, pair/context features, and calibrated weak-label hints. These outputs are useful for exploration and for choosing what a human should review next, but they are not human ground truth.
+
+The project keeps four label sources separate:
+
+- Weak labels: `weak_v2_...` threshold hints used for triage.
+- Machine proposals: rule-based proposed semantic labels with evidence and confidence.
+- Silver labels: high-confidence machine proposals accepted by deterministic rules.
+- Manual labels: human-edited labels only.
+
+Machine and silver labels must not be merged into `manual_labels.yaml`. They can help build a weak-supervised proxy baseline, but that model only learns feature rules and proxies. Its metrics are not semantic accuracy. Real supervised semantic ML still requires human labels distributed across multiple scenes/samples with grouped evaluation.
+
+Run the machine-labeling workflow on a clean local run:
+
+```powershell
+python -m vam_timeline_ai.cli run-machine-labeling-v1 ^
+  --run-dir data\runs\clean_v2 ^
+  --min-silver-confidence 0.75 ^
+  --train-silver-baseline true
+```
+
+This writes machine outputs under `data\runs\clean_v2\labels\machine_proposals\` and a review batch under `data\runs\clean_v2\labels\batches\batch_machine_review_001\`. Generated data remains local and ignored by git.
+
 ## Commands
 
 Print project and reference status:
