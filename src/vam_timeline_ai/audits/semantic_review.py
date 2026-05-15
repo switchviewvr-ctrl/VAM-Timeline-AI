@@ -55,7 +55,11 @@ def export_semantic_review_010(
     min_cowgirl_window_seconds: float = 4.0,
     use_cowgirl_candidate_score_v2: bool = False,
     use_cowgirl_candidate_score_v3: bool = False,
+    use_cowgirl_candidate_score_v4: bool = False,
     use_rider_receiver_discrimination: bool = False,
+    use_relative_motion_features: bool = False,
+    use_trajectory_shape_features: bool = False,
+    use_relative_reference_matches: bool = False,
 ) -> dict[str, Any]:
     if count != 10:
         raise ValueError("semantic review MVP expects exactly 10 items")
@@ -71,9 +75,15 @@ def export_semantic_review_010(
         "min_cowgirl_window_seconds": min_cowgirl_window_seconds,
         "use_cowgirl_candidate_score_v2": use_cowgirl_candidate_score_v2,
         "use_cowgirl_candidate_score_v3": use_cowgirl_candidate_score_v3,
+        "use_cowgirl_candidate_score_v4": use_cowgirl_candidate_score_v4,
         "use_rider_receiver_discrimination": use_rider_receiver_discrimination,
+        "use_relative_motion_features": use_relative_motion_features,
+        "use_trajectory_shape_features": use_trajectory_shape_features,
+        "use_relative_reference_matches": use_relative_reference_matches,
     }
-    if use_cowgirl_candidate_score_v3 or use_rider_receiver_discrimination:
+    if use_cowgirl_candidate_score_v4 or use_relative_motion_features or use_trajectory_shape_features or use_relative_reference_matches:
+        selected = _select_10_v6(data)
+    elif use_cowgirl_candidate_score_v3 or use_rider_receiver_discrimination:
         selected = _select_10_v5(data)
     elif use_cowgirl_candidate_score_v2:
         selected = _select_10_v4(data)
@@ -177,6 +187,10 @@ def _load_data(run: Path) -> dict[str, Any]:
         "cowgirl_scores_v2": {r.get("window_id"): r for r in load_jsonl(run / "audits" / "cowgirl_candidate_scores_v2.jsonl") if r.get("window_id")},
         "rider_receiver_scores": {r.get("window_id"): r for r in load_jsonl(run / "audits" / "rider_receiver_scores_v1.jsonl") if r.get("window_id")},
         "cowgirl_scores_v3": {r.get("window_id"): r for r in load_jsonl(run / "audits" / "cowgirl_candidate_scores_v3.jsonl") if r.get("window_id")},
+        "relative_features": {r.get("window_id"): r for r in load_jsonl(run / "relative_motion" / "relative_motion_features.jsonl") if r.get("window_id")},
+        "trajectory_features": {r.get("window_id"): r for r in load_jsonl(run / "relative_motion" / "trajectory_shape_features.jsonl") if r.get("window_id")},
+        "relative_reference_matches": {r.get("window_id"): r for r in load_jsonl(run / "relative_motion" / "relative_reference_matches.jsonl") if r.get("window_id")},
+        "cowgirl_scores_v4": {r.get("window_id"): r for r in load_jsonl(run / "audits" / "cowgirl_candidate_scores_v4.jsonl") if r.get("window_id")},
     }
 
 
@@ -445,6 +459,108 @@ def _select_10_v5(data: dict[str, Any]) -> list[dict[str, Any]]:
     return selected
 
 
+def _select_10_v6(data: dict[str, Any]) -> list[dict[str, Any]]:
+    flags = data.get("selection_flags", {})
+    min_duration = float(flags.get("min_cowgirl_window_seconds") or 4.0)
+    quotas = {
+        "likely_cowgirl_candidate": 4,
+        "transition_realign": 2,
+        "receiver_body_response": 1,
+        "likely_head_bj_false_positive": 1,
+        "isolated_gesture": 1,
+        "unknown_mess": 1,
+    }
+    pools = {key: [] for key in quotas}
+    grind_present = False
+    for wid, score in data["cowgirl_scores_v4"].items():
+        duration = float(score.get("duration_seconds") or 0.0)
+        safe = bool(score.get("safe_for_learning"))
+        if (
+            score.get("clean_cowgirl_candidate_v4")
+            and safe
+            and duration >= min_duration
+            and not score.get("likely_receiver_response")
+            and not score.get("likely_static_or_jitter")
+            and not score.get("likely_head_or_bj_false_positive")
+        ):
+            bonus = 0.05 if score.get("likely_cowgirl_grinding") else 0.0
+            grind_present = grind_present or bool(score.get("likely_cowgirl_grinding"))
+            labels = ["clean_cowgirl_candidate_v4"]
+            if score.get("likely_cowgirl_grinding"):
+                labels.append("oval_or_circular_grind_trajectory")
+            elif score.get("likely_cowgirl_vertical_bounce"):
+                labels.append("vertical_bounce_trajectory")
+            elif score.get("likely_cowgirl_forward_back_rock"):
+                labels.append("forward_back_rock_trajectory")
+            pools["likely_cowgirl_candidate"].append(
+                _candidate(
+                    "likely_cowgirl_candidate",
+                    wid,
+                    _pair_id_from_role_score(data["rider_receiver_scores"].get(wid, {})),
+                    float(score.get("final_clean_cowgirl_score_v4") or 0.0) + bonus,
+                    [
+                        "relative/trajectory Cowgirl score v4",
+                        f"duration {duration:.1f}s",
+                        f"shape {score.get('trajectory_shape_classification')}",
+                        "safe_for_learning true",
+                    ],
+                    labels,
+                )
+            )
+    if not grind_present:
+        for wid, score in data["cowgirl_scores_v4"].items():
+            if score.get("likely_cowgirl_grinding") and score.get("safe_for_learning") and not score.get("likely_receiver_response"):
+                pools["likely_cowgirl_candidate"].append(
+                    _candidate(
+                        "likely_cowgirl_candidate",
+                        wid,
+                        _pair_id_from_role_score(data["rider_receiver_scores"].get(wid, {})),
+                        float(score.get("final_clean_cowgirl_score_v4") or 0.0) * 0.9,
+                        ["grinding trajectory representative", "added to keep oval/circular grind evidence visible"],
+                        ["oval_or_circular_grind_trajectory"],
+                    )
+                )
+                break
+    for wid, score in data["cowgirl_scores_v4"].items():
+        rel = data["relative_reference_matches"].get(wid, {})
+        if score.get("likely_transition_or_adjustment") or rel.get("recommended_review_status") == "likely_transition_or_realign":
+            pools["transition_realign"].append(_candidate("transition_realign", wid, None, max(float(score.get("transition_penalty") or 0.0), float(rel.get("transition_trajectory_score") or 0.0)), ["transition/realign shape or relative-reference match"], ["transition_or_adjustment"]))
+        if score.get("likely_head_or_bj_false_positive") or rel.get("recommended_review_status") == "likely_not_cowgirl_head_or_bj":
+            pools["likely_head_bj_false_positive"].append(_candidate("likely_head_bj_false_positive", wid, None, max(float(rel.get("bj_relative_score") or 0.0), float(rel.get("head_relative_score") or 0.0), float(score.get("head_bj_penalty") or 0.0)), ["head/BJ false-positive guard in relative space"], ["head_or_bj_false_positive"]))
+        if score.get("likely_static_or_jitter") or rel.get("recommended_review_status") == "likely_isolated_gesture":
+            pools["isolated_gesture"].append(_candidate("isolated_gesture", wid, None, max(float(rel.get("jitter_static_score") or 0.0), float(score.get("jitter_penalty") or 0.0)), ["static/jitter or isolated gesture candidate in relative trajectory space"], ["static_or_jitter"]))
+        if rel.get("recommended_review_status") in {"unsafe_relative_motion", "unknown_needs_review"} or not score.get("safe_for_learning"):
+            pools["unknown_mess"].append(_candidate("unknown_mess", wid, None, 1.0 if not score.get("safe_for_learning") else 0.4, ["unsafe/unknown relative motion review case"], [rel.get("recommended_review_status") or "unknown_relative_motion"]))
+    for wid, score in data["rider_receiver_scores"].items():
+        status = score.get("rider_receiver_status")
+        receiver_score = float(score.get("receiver_body_response_score") or 0.0)
+        if status == "likely_receiver_body_response" or receiver_score >= 0.55:
+            pools["receiver_body_response"].append(
+                _candidate(
+                    "receiver_body_response",
+                    wid,
+                    _pair_id_from_role_score(score),
+                    receiver_score,
+                    ["receiver/body-response false-positive candidate retained for audit"],
+                    ["receiver_body_response", "not_active_rider"],
+                )
+            )
+    for rows in pools.values():
+        _enrich_candidates(rows, data)
+        rows.sort(key=lambda r: float(r.get("score") or 0.0), reverse=True)
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    per_scene: Counter[str] = Counter()
+    per_sample: Counter[str] = Counter()
+    for category, quota in quotas.items():
+        _take(pools[category], quota, selected, seen, per_scene, per_sample, strict=True)
+    if len(selected) < 10:
+        _take([c for rows in pools.values() for c in rows], 10 - len(selected), selected, seen, per_scene, per_sample, strict=False)
+    if len(selected) != 10:
+        raise ValueError(f"Could not select exactly 10 examples; selected {len(selected)}")
+    return selected
+
+
 def _positive_candidates(data: dict[str, Any]) -> list[dict[str, Any]]:
     out = []
     wanted = {"cowgirl_vertical_bounce", "cowgirl_forward_back_rock", "cowgirl_circular_grind"}
@@ -588,10 +704,14 @@ def _make_review_row(idx: int, item: dict[str, Any], data: dict[str, Any]) -> di
     cowgirl_score = data["cowgirl_scores_v2"].get(wid, {})
     rider_receiver = data["rider_receiver_scores"].get(wid, {})
     cowgirl_score_v3 = data["cowgirl_scores_v3"].get(wid, {})
+    relative_feature = data["relative_features"].get(wid, {})
+    trajectory_feature = data["trajectory_features"].get(wid, {})
+    relative_match = data["relative_reference_matches"].get(wid, {})
+    cowgirl_score_v4 = data["cowgirl_scores_v4"].get(wid, {})
     phase = classify_motion_phase(frow, body_quality)
     guard = evaluate_domain_guards(frow, body_quality)
     review_id = f"review_{idx:03d}"
-    guess = _semantic_guess(item, frow, window_scores, pair_feature, pair_scores, silver_window, silver_pair, body_quality, phase, guard, reference_match, rider_receiver, cowgirl_score_v3)
+    guess = _semantic_guess(item, frow, window_scores, pair_feature, pair_scores, silver_window, silver_pair, body_quality, phase, guard, reference_match, rider_receiver, cowgirl_score_v3, relative_feature, trajectory_feature, relative_match, cowgirl_score_v4)
     pair_actor = _pair_actor(wid, pair)
     return {
         "review_id": review_id,
@@ -627,12 +747,16 @@ def _make_review_row(idx: int, item: dict[str, Any], data: dict[str, Any]) -> di
             "clean_cowgirl_candidate_score_v2": cowgirl_score,
             "rider_receiver_discrimination": rider_receiver,
             "clean_cowgirl_candidate_score_v3": cowgirl_score_v3,
+            "relative_motion_features": relative_feature,
+            "trajectory_shape_features": trajectory_feature,
+            "relative_reference_match": relative_match,
+            "clean_cowgirl_candidate_score_v4": cowgirl_score_v4,
         },
         "why_selected": item["why_selected"],
         "user_questions": _questions_for_item(bool(pair)),
         "answer_options": ["correct", "wrong", "unclear"],
         "is_human_ground_truth": False,
-        "export_context_padding_seconds": 0.5 if (data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v2") or data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v3")) else 0.0,
+        "export_context_padding_seconds": 0.5 if (data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v2") or data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v3") or data.get("selection_flags", {}).get("use_cowgirl_candidate_score_v4")) else 0.0,
     }
 
 
@@ -650,6 +774,10 @@ def _semantic_guess(
     reference_match: dict[str, Any] | None = None,
     rider_receiver: dict[str, Any] | None = None,
     cowgirl_score_v3: dict[str, Any] | None = None,
+    relative_feature: dict[str, Any] | None = None,
+    trajectory_feature: dict[str, Any] | None = None,
+    relative_match: dict[str, Any] | None = None,
+    cowgirl_score_v4: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     score_labels = [str(r.get("label")) for r in sorted(scores, key=lambda r: float(r.get("final_score") or 0.0), reverse=True)]
     silver_labels = list(silver_window.get("positive_labels", []) or [])
@@ -678,6 +806,10 @@ def _semantic_guess(
     reference_match = reference_match or {}
     rider_receiver = rider_receiver or {}
     cowgirl_score_v3 = cowgirl_score_v3 or {}
+    relative_feature = relative_feature or {}
+    trajectory_feature = trajectory_feature or {}
+    relative_match = relative_match or {}
+    cowgirl_score_v4 = cowgirl_score_v4 or {}
     multiplier = float(guard.get("cowgirl_confidence_multiplier") or 1.0)
     if body_quality.get("body_motion_quality") in {"controller_only_whole_person_motion", "root_only_motion"}:
         active_candidate = "unsafe/root-motion only; not valid rider output"
@@ -694,6 +826,19 @@ def _semantic_guess(
     if cowgirl_score_v3.get("likely_grinding_subtype"):
         movement_labels = _dedupe(["cowgirl_circular_grind", *movement_labels])[:3]
         move_conf = max(move_conf, _num(cowgirl_score_v3.get("cowgirl_grinding_score"), 0.0))
+    if cowgirl_score_v4.get("likely_cowgirl_grinding"):
+        movement_labels = _dedupe(["cowgirl_circular_grind", *movement_labels])[:4]
+        move_conf = max(move_conf, _num(cowgirl_score_v4.get("final_clean_cowgirl_score_v4"), 0.0), _num(cowgirl_score_v4.get("trajectory_grind_score"), 0.0))
+    elif cowgirl_score_v4.get("likely_cowgirl_vertical_bounce"):
+        movement_labels = _dedupe(["cowgirl_vertical_bounce", *movement_labels])[:4]
+        move_conf = max(move_conf, _num(cowgirl_score_v4.get("final_clean_cowgirl_score_v4"), 0.0))
+    elif cowgirl_score_v4.get("likely_cowgirl_forward_back_rock"):
+        movement_labels = _dedupe(["cowgirl_forward_back_rock", *movement_labels])[:4]
+        move_conf = max(move_conf, _num(cowgirl_score_v4.get("final_clean_cowgirl_score_v4"), 0.0))
+    if cowgirl_score_v4.get("likely_static_or_jitter"):
+        movement_labels = _dedupe(["static_or_jitter_trajectory", *movement_labels])[:4]
+    if cowgirl_score_v4.get("likely_head_or_bj_false_positive"):
+        movement_labels = _dedupe(["possible_non_cowgirl_head_dominant_motion", *movement_labels])[:4]
     if role_status == "likely_active_rider":
         active_candidate = "likely yes (motion/pair evidence)"
         passive_candidate = "unlikely"
@@ -729,6 +874,17 @@ def _semantic_guess(
         "clean_cowgirl_rider_score_v3": cowgirl_score_v3.get("final_clean_cowgirl_rider_score_v3"),
         "cowgirl_grinding_score": cowgirl_score_v3.get("cowgirl_grinding_score"),
         "likely_grinding_subtype": cowgirl_score_v3.get("likely_grinding_subtype"),
+        "relative_cowgirl_score": relative_match.get("cowgirl_relative_score"),
+        "trajectory_shape_classification": trajectory_feature.get("trajectory_shape_classification"),
+        "oval_path_score": (trajectory_feature.get("feature_values") or {}).get("oval_path_score"),
+        "ellipse_fit_score": (trajectory_feature.get("feature_values") or {}).get("ellipse_fit_score"),
+        "closed_loop_ratio": (trajectory_feature.get("feature_values") or {}).get("closed_loop_ratio"),
+        "dominant_motion_plane": trajectory_feature.get("dominant_motion_plane"),
+        "clean_cowgirl_score_v4": cowgirl_score_v4.get("final_clean_cowgirl_score_v4"),
+        "safe_for_learning": bool((relative_feature.get("feature_values") or {}).get("safe_for_learning") or relative_match.get("safe_for_learning")),
+        "teleport_risk": (relative_feature.get("feature_quality") or {}).get("teleport_risk"),
+        "safe_for_generation_template": bool(cowgirl_score_v4.get("safe_for_learning")) and False,
+        "relative_nearest_handmade_references": relative_match.get("nearest_handmade_references", []),
         "why_not_receiver_body_response": (
             "receiver/body-response penalty did not trigger"
             if role_status != "likely_receiver_body_response"
@@ -791,6 +947,11 @@ def _attempt_timeline_export(row: dict[str, Any], data: dict[str, Any], out_dir:
         "controller_names": names,
         "export_format": "AcidBubbles Timeline-style JSON, dense linear keys",
         "coordinate_space_assumption": "Original Timeline controller-space/control-space for the same source scene and atom; not retargeted.",
+        "source_world_coords_stripped": safety["source_world_coords_stripped"],
+        "exported_as_relative_motion": safety["exported_as_relative_motion"],
+        "safe_for_import": safety["safe_for_import"],
+        "safe_for_learning": bool(row.get("system_semantic_guess", {}).get("safe_for_learning")),
+        "safe_for_generation_template": safety["safe_for_generation_template"],
         "exported_controller_count": len(names),
         "stripped_world_transform_count": safety["stripped_world_transform_count"],
         "stripped_atom_root_count": safety["stripped_atom_root_count"],
@@ -802,6 +963,7 @@ def _attempt_timeline_export(row: dict[str, Any], data: dict[str, Any], out_dir:
             "VaM visual import has not been tested.",
             "Use the original source scene/atom for safest review.",
             "This export is a convenience segment, not proof of semantic correctness.",
+            "This review export uses source controller coordinates and is not a generation-safe relative template.",
         ],
         "import_instructions": "Open a copy of the source scene, select the listed technical atom, open AcidBubbles Timeline, and try importing the JSON segment if your Timeline version accepts this external format.",
         "roundtrip": roundtrip,
@@ -850,7 +1012,12 @@ def _filter_safe_export_controllers(positions: np.ndarray, rotations: np.ndarray
         "coordinate_space_assumption": "Allowed bodypart controller tracks only; Person/root/world tracks stripped.",
         "teleport_risk": teleport_risk,
         "export_safe_for_import": bool(safe_names) and teleport_risk in {"low", "medium"},
+        "safe_for_import": bool(safe_names) and teleport_risk in {"low", "medium"},
         "timeline_export_safe_for_animation": bool(safe_names) and moving >= 1,
+        "source_world_coords_stripped": bool(stripped_root or stripped_world),
+        "exported_as_relative_motion": False,
+        "safe_for_generation_template": False,
+        "review_export_warning": "This export is for VaM review only. It preserves source controller coordinates and is not a generative reuse template.",
         "stripped_controller_names": [name for idx, name in enumerate(names) if idx not in safe_indices],
     }
     return safe_positions, safe_rotations, safe_names, safety
@@ -1177,6 +1344,11 @@ def _write_index_html(rows: list[dict[str, Any]], out: Path) -> None:
             f"(active={guess.get('active_rider_score')}, receiver={guess.get('receiver_body_response_score')})</li>"
             f"<li>Clean Cowgirl rider score v3: {html.escape(str(guess.get('clean_cowgirl_rider_score_v3')))}</li>"
             f"<li>Grinding subtype score: {html.escape(str(guess.get('cowgirl_grinding_score')))}</li>"
+            f"<li>Relative Cowgirl score: {html.escape(str(guess.get('relative_cowgirl_score')))}</li>"
+            f"<li>Trajectory shape: {html.escape(str(guess.get('trajectory_shape_classification')))} "
+            f"(oval={html.escape(str(guess.get('oval_path_score')))}, ellipse={html.escape(str(guess.get('ellipse_fit_score')))}, closed={html.escape(str(guess.get('closed_loop_ratio')))})</li>"
+            f"<li>Clean Cowgirl score v4: {html.escape(str(guess.get('clean_cowgirl_score_v4')))}</li>"
+            f"<li>Safe for learning: {html.escape(str(guess.get('safe_for_learning')))}; teleport risk: {html.escape(str(guess.get('teleport_risk')))}</li>"
             f"<li>Reference status: {html.escape(str(guess.get('reference_review_status')))}</li>"
             f"<li>Overall confidence: {guess.get('overall_confidence')}</li></ul>"
             f"<p><b>Hints are not truth.</b> Machine/weak/silver labels must be checked in VaM.</p>"

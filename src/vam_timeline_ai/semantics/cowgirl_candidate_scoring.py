@@ -64,6 +64,48 @@ def score_cowgirl_candidates_v3(
     return rows
 
 
+def score_cowgirl_candidates_v4(
+    run_dir: str | Path,
+    relative_reference_matches: str | Path,
+    relative_features: str | Path,
+    trajectory_features: str | Path,
+    body_quality: str | Path,
+    rider_receiver_scores: str | Path,
+    features: str | Path,
+    out_jsonl: str | Path,
+    report: str | Path,
+) -> list[dict[str, Any]]:
+    """Score clean Cowgirl candidates using relative motion and trajectory shape.
+
+    This is still review triage.  It is intentionally not a classifier and not a
+    training target.
+    """
+    run = Path(run_dir)
+    windows = {r.get("window_id"): r for r in load_jsonl(run / "semantic" / "movement_windows.jsonl") if r.get("window_id")}
+    rel_matches = {r.get("window_id"): r for r in load_jsonl(relative_reference_matches) if r.get("window_id")}
+    rel_features = {r.get("window_id"): r for r in load_jsonl(relative_features) if r.get("window_id")}
+    trajectories = {r.get("window_id"): r for r in load_jsonl(trajectory_features) if r.get("window_id")}
+    body = {r.get("window_id"): r for r in load_jsonl(body_quality) if r.get("window_id")}
+    rider_receiver = {r.get("window_id"): r for r in load_jsonl(rider_receiver_scores) if r.get("window_id")}
+    feature_rows = {r.get("window_id"): r for r in load_jsonl(features) if r.get("window_id")}
+    rows = [
+        score_window_v4(
+            feature_rows[wid],
+            body.get(wid, {}),
+            rel_matches.get(wid, {}),
+            rel_features.get(wid, {}),
+            trajectories.get(wid, {}),
+            windows.get(wid, {}),
+            rider_receiver.get(wid, {}),
+        )
+        for wid in feature_rows
+    ]
+    rows.sort(key=lambda r: float(r.get("final_clean_cowgirl_score_v4") or 0.0), reverse=True)
+    write_jsonl(out_jsonl, rows)
+    _write_report_v4(rows, report)
+    return rows
+
+
 def score_window(feature_row: dict[str, Any], body: dict[str, Any], match: dict[str, Any], window: dict[str, Any]) -> dict[str, Any]:
     values = feature_row.get("feature_values", {}) or {}
     duration = _num(window.get("duration_seconds") or window.get("window_size_seconds") or 0.0)
@@ -223,6 +265,130 @@ def score_window_v3(
     return out
 
 
+def score_window_v4(
+    feature_row: dict[str, Any],
+    body: dict[str, Any],
+    relative_match: dict[str, Any],
+    relative_feature: dict[str, Any],
+    trajectory: dict[str, Any],
+    window: dict[str, Any],
+    rider_receiver: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Relative/trajectory Cowgirl score for review selection only."""
+    rider_receiver = rider_receiver or {}
+    values = feature_row.get("feature_values", {}) or {}
+    rel_values = relative_feature.get("feature_values", {}) or {}
+    traj_values = trajectory.get("feature_values", {}) or {}
+    duration = _num(window.get("duration_seconds") or feature_row.get("duration_seconds") or 0.0)
+    body_quality = str(body.get("body_motion_quality") or "unknown")
+    role_status = str(rider_receiver.get("rider_receiver_status") or "role_unclear")
+
+    relative_cowgirl_reference_score = _num(relative_match.get("cowgirl_relative_score"))
+    trajectory_grind_score = _num(relative_match.get("cowgirl_grind_trajectory_score") or traj_values.get("grind_pattern_score"))
+    trajectory_bounce_score = _num(relative_match.get("cowgirl_bounce_trajectory_score") or traj_values.get("bounce_pattern_score"))
+    trajectory_forward_back_score = _num(relative_match.get("cowgirl_forward_back_rock_score") or traj_values.get("forward_back_rock_pattern_score"))
+    oval_path_score = _num(traj_values.get("oval_path_score"))
+    ellipse_fit_score = _num(traj_values.get("ellipse_fit_score"))
+    closed_loop_ratio = _num(traj_values.get("closed_loop_ratio"))
+    safe_for_learning = bool(relative_feature.get("feature_values", {}).get("safe_for_learning") or relative_match.get("safe_for_learning"))
+    safe_for_learning_score = 1.0 if safe_for_learning else 0.0
+    active_rider_score = _num(rider_receiver.get("active_rider_score"))
+    receiver_score = _num(rider_receiver.get("receiver_body_response_score"))
+    static_micro = bool(body.get("static_or_micro_motion")) or body_quality in {"static_or_empty", "static_or_micro_motion"}
+    head_only = bool(body.get("minimal_head_motion_only")) or relative_match.get("recommended_review_status") == "likely_not_cowgirl_head_or_bj"
+    jitter = _num(traj_values.get("jitter_score") or relative_match.get("jitter_static_score"))
+    transition = max(_num(traj_values.get("transition_path_score")), _num(relative_match.get("transition_trajectory_score")))
+    root_world = body_quality in {"controller_only_whole_person_motion", "root_only_motion"} or not safe_for_learning
+    duration_score = 1.0 if duration >= 8 else 0.88 if duration >= 4 else 0.35 if duration >= 2 else 0.0
+
+    grind_subtype = max(trajectory_grind_score, oval_path_score * 0.75, ellipse_fit_score * 0.65)
+    bounce_subtype = trajectory_bounce_score
+    forward_subtype = trajectory_forward_back_score
+    motion_shape_support = max(grind_subtype, bounce_subtype, forward_subtype)
+    raw = (
+        0.24 * relative_cowgirl_reference_score
+        + 0.24 * motion_shape_support
+        + 0.14 * oval_path_score
+        + 0.10 * closed_loop_ratio
+        + 0.12 * safe_for_learning_score
+        + 0.10 * active_rider_score
+        + 0.06 * duration_score
+    )
+    receiver_penalty = 0.75 if role_status == "likely_receiver_body_response" else min(receiver_score * 0.45, 0.40)
+    static_micro_penalty = 0.80 if static_micro else 0.0
+    root_world_penalty = 0.90 if root_world else 0.0
+    transition_penalty = 0.45 if transition >= 0.58 else 0.20 if transition >= 0.42 else 0.0
+    head_bj_penalty = 0.70 if head_only else min(max(_num(relative_match.get("bj_relative_score")), _num(relative_match.get("head_relative_score"))) * 0.35, 0.45)
+    jitter_penalty = 0.65 if jitter >= 0.70 else min(jitter * 0.35, 0.35)
+    penalty = receiver_penalty + static_micro_penalty + root_world_penalty + transition_penalty + head_bj_penalty + jitter_penalty
+    final_score = max(0.0, min(1.0, raw * max(0.0, 1.0 - penalty)))
+
+    likely_receiver = role_status == "likely_receiver_body_response" or receiver_penalty >= 0.65
+    likely_grinding = bool(grind_subtype >= 0.50 and oval_path_score >= 0.35 and final_score >= 0.35)
+    likely_bounce = bool(bounce_subtype >= 0.45 and bounce_subtype >= forward_subtype)
+    likely_forward = bool(forward_subtype >= 0.40 and forward_subtype >= bounce_subtype)
+    likely_transition = bool(transition_penalty >= 0.20)
+    likely_static = bool(static_micro or jitter >= 0.70)
+    likely_head = bool(head_only or head_bj_penalty >= 0.50)
+    reject_reasons = []
+    if likely_receiver:
+        reject_reasons.append("likely_receiver_body_response")
+    if root_world:
+        reject_reasons.append("unsafe_root_world_or_no_relative_learning")
+    if static_micro:
+        reject_reasons.append("static_or_micro_motion")
+    if head_only:
+        reject_reasons.append("head_only_or_head_bj_false_positive")
+    if jitter >= 0.70:
+        reject_reasons.append("jitter_static_trajectory")
+    if duration < 4:
+        reject_reasons.append("too_short_for_semantic_judgment")
+    clean = bool(final_score >= 0.50 and safe_for_learning and duration >= 4 and not likely_receiver and not likely_static and not likely_head and not root_world)
+    return {
+        "window_id": feature_row.get("window_id"),
+        "sample_id": feature_row.get("sample_id"),
+        "source_id": feature_row.get("source_id"),
+        "source_scene_file": feature_row.get("source_scene_file"),
+        "technical_atom_id": feature_row.get("technical_atom_id"),
+        "duration_seconds": duration,
+        "relative_cowgirl_reference_score": round(float(relative_cowgirl_reference_score), 6),
+        "trajectory_grind_score": round(float(trajectory_grind_score), 6),
+        "trajectory_bounce_score": round(float(trajectory_bounce_score), 6),
+        "trajectory_forward_back_score": round(float(trajectory_forward_back_score), 6),
+        "oval_path_score": round(float(oval_path_score), 6),
+        "ellipse_fit_score": round(float(ellipse_fit_score), 6),
+        "closed_loop_ratio": round(float(closed_loop_ratio), 6),
+        "duration_score": round(float(duration_score), 6),
+        "safe_for_learning_score": round(float(safe_for_learning_score), 6),
+        "active_rider_score": round(float(active_rider_score), 6),
+        "receiver_body_response_penalty": round(float(receiver_penalty), 6),
+        "static_micro_penalty": round(float(static_micro_penalty), 6),
+        "root_world_penalty": round(float(root_world_penalty), 6),
+        "transition_penalty": round(float(transition_penalty), 6),
+        "head_bj_penalty": round(float(head_bj_penalty), 6),
+        "jitter_penalty": round(float(jitter_penalty), 6),
+        "final_clean_cowgirl_score_v4": round(float(final_score), 6),
+        "clean_cowgirl_candidate_v4": clean,
+        "likely_cowgirl_grinding": likely_grinding,
+        "likely_cowgirl_vertical_bounce": likely_bounce,
+        "likely_cowgirl_forward_back_rock": likely_forward,
+        "likely_transition_or_adjustment": likely_transition,
+        "likely_receiver_response": likely_receiver,
+        "likely_static_or_jitter": likely_static,
+        "likely_head_or_bj_false_positive": likely_head,
+        "trajectory_shape_classification": trajectory.get("trajectory_shape_classification"),
+        "dominant_motion_plane": trajectory.get("dominant_motion_plane"),
+        "safe_for_learning": safe_for_learning,
+        "role_status": role_status,
+        "body_motion_quality": body_quality,
+        "relative_review_status": relative_match.get("recommended_review_status"),
+        "nearest_handmade_references": relative_match.get("nearest_handmade_references", []),
+        "reject_reasons": _dedupe(reject_reasons),
+        "warning": "Cowgirl v4 score is review triage based on relative motion and trajectory shape, not ground truth.",
+        "is_human_ground_truth": False,
+    }
+
+
 def _write_report(rows: list[dict[str, Any]], report: str | Path) -> None:
     target = Path(report)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -287,6 +453,44 @@ def _write_report_v3(rows: list[dict[str, Any]], report: str | Path) -> None:
             f"- `{row.get('window_id')}` receiver={row.get('receiver_body_response_score')} "
             f"active={row.get('active_rider_score')} v3={row.get('final_clean_cowgirl_rider_score_v3')} "
             f"scene=`{row.get('source_scene_file')}`"
+        )
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_report_v4(rows: list[dict[str, Any]], report: str | Path) -> None:
+    target = Path(report)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    clean = [r for r in rows if r.get("clean_cowgirl_candidate_v4")]
+    grind = [r for r in rows if r.get("likely_cowgirl_grinding")]
+    bounce = [r for r in rows if r.get("likely_cowgirl_vertical_bounce")]
+    forward = [r for r in rows if r.get("likely_cowgirl_forward_back_rock")]
+    receiver = [r for r in rows if r.get("likely_receiver_response")]
+    rejection_counts = Counter(reason for r in rows for reason in r.get("reject_reasons", []))
+    shape_counts = Counter(r.get("trajectory_shape_classification") for r in rows)
+    lines = [
+        "# Cowgirl Candidate Score V4 Report",
+        "",
+        "V4 uses relative motion, trajectory shape, and rider/receiver scores. It is review triage only, not ML training truth.",
+        "",
+        f"- Windows scored: {len(rows)}",
+        f"- Clean Cowgirl candidates v4: {len(clean)}",
+        f"- Grinding subtype candidates: {len(grind)}",
+        f"- Vertical bounce subtype candidates: {len(bounce)}",
+        f"- Forward/back rock subtype candidates: {len(forward)}",
+        f"- Receiver/body-response rejected candidates: {len(receiver)}",
+        "",
+        "## Rejection Reasons",
+        "",
+    ]
+    lines.extend(f"- `{k}`: {v}" for k, v in rejection_counts.most_common()) if rejection_counts else lines.append("- None")
+    lines.extend(["", "## Trajectory Shapes", ""])
+    lines.extend(f"- `{k}`: {v}" for k, v in shape_counts.most_common()) if shape_counts else lines.append("- None")
+    lines.extend(["", "## Top V4 Candidates", ""])
+    for row in rows[:30]:
+        lines.append(
+            f"- `{row.get('window_id')}` score={row.get('final_clean_cowgirl_score_v4')} "
+            f"shape={row.get('trajectory_shape_classification')} grind={row.get('trajectory_grind_score')} "
+            f"role={row.get('role_status')} safe={row.get('safe_for_learning')} reject={row.get('reject_reasons')}"
         )
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
 

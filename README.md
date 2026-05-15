@@ -765,6 +765,21 @@ python -m vam_timeline_ai.cli analyze-supervised-readiness ^
 
 Supervised ML starts only if real manual labels are sufficient across grouped scenes/samples with negative/control examples. See [MANUAL_LABEL_INGESTION_AND_SUPERVISED_READINESS.md](references/MANUAL_LABEL_INGESTION_AND_SUPERVISED_READINESS.md), [SUPERVISED_BASELINE_V0.md](references/SUPERVISED_BASELINE_V0.md), and [ACTIVE_LABELING_BATCHES.md](references/ACTIVE_LABELING_BATCHES.md).
 
+## Relative Motion And Trajectory Shape
+
+Raw Timeline coordinates are not reusable motion knowledge. They can encode source-scene placement, Person/root transforms, and world-space pose data. The relative motion layer strips Person/root/world-like tracks, keeps only allowed body controllers, and converts motion into local deltas before extracting features.
+
+Trajectory shape analysis inspects relative pelvis/hip paths for audit signals such as oval/circular grinding, vertical bounce, forward/back rock, transition paths, and jitter/static micro-motion. These signals are used to build safer semantic review batches, not to create ground truth.
+
+Timeline segment exports in semantic review folders are for VaM inspection only unless explicitly marked generation-safe. Current review exports preserve source controller coordinates and are marked `safe_for_generation_template: false`.
+
+References:
+
+- [Relative Motion Representation](references/RELATIVE_MOTION_REPRESENTATION.md)
+- [Coordinate Space And Teleport Safety](references/COORDINATE_SPACE_AND_TELEPORT_SAFETY.md)
+- [Why Raw Timeline Coordinates Are Not Motion](references/WHY_RAW_TIMELINE_COORDINATES_ARE_NOT_MOTION.md)
+- [Trajectory Shape Analysis](references/TRAJECTORY_SHAPE_ANALYSIS.md)
+
 ## Public GitHub Safety
 
 This repository is public and should contain code, docs, tests, schemas, templates, and lightweight folder placeholders only. Generated local data, raw VaM scenes, baked arrays, previews, model files, and human labels must stay out of Git.

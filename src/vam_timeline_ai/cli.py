@@ -72,7 +72,11 @@ def build_parser() -> argparse.ArgumentParser:
     semantic_review.add_argument("--min-cowgirl-window-seconds", type=float, default=4.0)
     semantic_review.add_argument("--use-cowgirl-candidate-score-v2", default="false")
     semantic_review.add_argument("--use-cowgirl-candidate-score-v3", default="false")
+    semantic_review.add_argument("--use-cowgirl-candidate-score-v4", default="false")
     semantic_review.add_argument("--use-rider-receiver-discrimination", default="false")
+    semantic_review.add_argument("--use-relative-motion-features", default="false")
+    semantic_review.add_argument("--use-trajectory-shape-features", default="false")
+    semantic_review.add_argument("--use-relative-reference-matches", default="false")
 
     semantic_summary = subparsers.add_parser("summarize-semantic-review-010", help="Summarize user answers for the 10-item semantic review.")
     semantic_summary.add_argument("--answers", required=True)
@@ -165,6 +169,40 @@ def build_parser() -> argparse.ArgumentParser:
     cowgirl_score_v3.add_argument("--out-jsonl", required=True)
     cowgirl_score_v3.add_argument("--report", required=True)
 
+    rel_windows = subparsers.add_parser("build-relative-motion-windows", help="Build safe relative/local body-controller window representations.")
+    rel_windows.add_argument("--run-dir", required=True)
+    rel_windows.add_argument("--sample-index", required=True)
+    rel_windows.add_argument("--windows", required=True)
+    rel_windows.add_argument("--controller-map", required=True)
+    rel_windows.add_argument("--body-quality", required=True)
+    rel_windows.add_argument("--out-dir", required=True)
+    rel_windows.add_argument("--index-out", required=True)
+    rel_windows.add_argument("--report", required=True)
+
+    rel_features = subparsers.add_parser("extract-relative-motion-features", help="Extract features from relative/local motion windows.")
+    rel_features.add_argument("--relative-index", required=True)
+    rel_features.add_argument("--out-jsonl", required=True)
+    rel_features.add_argument("--out-npz", required=True)
+    rel_features.add_argument("--report", required=True)
+
+    traj_shapes = subparsers.add_parser("analyze-trajectory-shapes", help="Analyze relative pelvis/hip trajectory shapes.")
+    traj_shapes.add_argument("--relative-index", required=True)
+    traj_shapes.add_argument("--relative-features", required=True)
+    traj_shapes.add_argument("--out-jsonl", required=True)
+    traj_shapes.add_argument("--out-npz", required=True)
+    traj_shapes.add_argument("--report", required=True)
+
+    cowgirl_score_v4 = subparsers.add_parser("score-cowgirl-candidates-v4", help="Score Cowgirl candidates using relative motion and trajectory shape.")
+    cowgirl_score_v4.add_argument("--run-dir", required=True)
+    cowgirl_score_v4.add_argument("--relative-reference-matches", required=True)
+    cowgirl_score_v4.add_argument("--relative-features", required=True)
+    cowgirl_score_v4.add_argument("--trajectory-features", required=True)
+    cowgirl_score_v4.add_argument("--body-quality", required=True)
+    cowgirl_score_v4.add_argument("--rider-receiver-scores", required=True)
+    cowgirl_score_v4.add_argument("--features", required=True)
+    cowgirl_score_v4.add_argument("--out-jsonl", required=True)
+    cowgirl_score_v4.add_argument("--report", required=True)
+
     cmap = subparsers.add_parser("discover-controller-map", help="Discover controller names and conservative body-part mapping.")
     cmap.add_argument("--sample-index", required=True)
     cmap.add_argument("--out", required=True)
@@ -190,6 +228,13 @@ def build_parser() -> argparse.ArgumentParser:
     handmade_features.add_argument("--out-npz", required=True)
     handmade_features.add_argument("--report", required=True)
 
+    handmade_relative = subparsers.add_parser("build-handmade-relative-reference-features", help="Build relative and trajectory features for handmade references.")
+    handmade_relative.add_argument("--handmade-sample-index", required=True)
+    handmade_relative.add_argument("--controller-map", required=True)
+    handmade_relative.add_argument("--out-jsonl", required=True)
+    handmade_relative.add_argument("--out-npz", required=True)
+    handmade_relative.add_argument("--report", required=True)
+
     handmade_sigs = subparsers.add_parser("build-handmade-reference-signatures", help="Build handmade reference family signatures.")
     handmade_sigs.add_argument("--features", required=True)
     handmade_sigs.add_argument("--out-json", required=True)
@@ -202,6 +247,14 @@ def build_parser() -> argparse.ArgumentParser:
     handmade_match.add_argument("--signatures", required=True)
     handmade_match.add_argument("--out-jsonl", required=True)
     handmade_match.add_argument("--report", required=True)
+
+    relative_match = subparsers.add_parser("compare-relative-wild-to-handmade", help="Compare wild and handmade references in relative + trajectory feature space.")
+    relative_match.add_argument("--wild-relative-features", required=True)
+    relative_match.add_argument("--wild-trajectory-features", required=True)
+    relative_match.add_argument("--handmade-relative-features", required=True)
+    relative_match.add_argument("--handmade-trajectory-features", required=True)
+    relative_match.add_argument("--out-jsonl", required=True)
+    relative_match.add_argument("--report", required=True)
 
     pairs = subparsers.add_parser("build-context-pair-candidates", help="Build possible actor/context pair candidates without roles.")
     pairs.add_argument("--sample-index", required=True)
@@ -746,6 +799,55 @@ def cmd_score_cowgirl_candidates_v3(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_build_relative_motion_windows(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.motion.relative_motion import build_relative_motion_windows
+
+    rows = build_relative_motion_windows(args.run_dir, args.sample_index, args.windows, args.controller_map, args.body_quality, args.out_dir, args.index_out, args.report)
+    safe = sum(1 for row in rows if row.get("safe_for_learning"))
+    print(f"Relative motion windows written: {args.index_out}")
+    print(f"Rows: {len(rows)}; safe_for_learning: {safe}")
+    return 0
+
+
+def cmd_extract_relative_motion_features(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.features.relative_features import extract_relative_motion_features
+
+    rows = extract_relative_motion_features(args.relative_index, args.out_jsonl, args.out_npz, args.report)
+    safe = sum(1 for row in rows if row.get("feature_values", {}).get("safe_for_learning"))
+    print(f"Relative motion features written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; safe_for_learning: {safe}")
+    return 0
+
+
+def cmd_analyze_trajectory_shapes(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.features.trajectory_shape import analyze_trajectory_shapes
+
+    rows = analyze_trajectory_shapes(args.relative_index, args.relative_features, args.out_jsonl, args.out_npz, args.report)
+    print(f"Trajectory shape features written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}")
+    return 0
+
+
+def cmd_score_cowgirl_candidates_v4(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.cowgirl_candidate_scoring import score_cowgirl_candidates_v4
+
+    rows = score_cowgirl_candidates_v4(
+        args.run_dir,
+        args.relative_reference_matches,
+        args.relative_features,
+        args.trajectory_features,
+        args.body_quality,
+        args.rider_receiver_scores,
+        args.features,
+        args.out_jsonl,
+        args.report,
+    )
+    clean = sum(1 for row in rows if row.get("clean_cowgirl_candidate_v4"))
+    print(f"Cowgirl candidate scores v4 written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; clean relative/trajectory candidates: {clean}")
+    return 0
+
+
 def cmd_discover_controller_map(args: argparse.Namespace) -> int:
     from vam_timeline_ai.motion.controller_mapping import discover_controller_map
 
@@ -784,6 +886,16 @@ def cmd_extract_handmade_reference_features(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_build_handmade_relative_reference_features(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.references.handmade_relative import build_handmade_relative_reference_features
+
+    rows = build_handmade_relative_reference_features(args.handmade_sample_index, args.controller_map, args.out_jsonl, args.out_npz, args.report)
+    safe = sum(1 for row in rows if row.get("safe_for_learning"))
+    print(f"Handmade relative features written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; safe_for_learning: {safe}")
+    return 0
+
+
 def cmd_build_handmade_reference_signatures(args: argparse.Namespace) -> int:
     from vam_timeline_ai.references.signature_report import build_handmade_reference_signatures
 
@@ -798,6 +910,22 @@ def cmd_compare_wild_to_handmade_references(args: argparse.Namespace) -> int:
 
     rows = compare_wild_to_handmade_references(args.wild_features, args.wild_body_quality, args.handmade_features, args.signatures, args.out_jsonl, args.report)
     print(f"Wild/reference matches written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}")
+    return 0
+
+
+def cmd_compare_relative_wild_to_handmade(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.references.relative_matcher import compare_relative_wild_to_handmade
+
+    rows = compare_relative_wild_to_handmade(
+        args.wild_relative_features,
+        args.wild_trajectory_features,
+        args.handmade_relative_features,
+        args.handmade_trajectory_features,
+        args.out_jsonl,
+        args.report,
+    )
+    print(f"Relative wild/reference matches written: {args.out_jsonl}")
     print(f"Rows: {len(rows)}")
     return 0
 
@@ -1284,7 +1412,11 @@ def cmd_export_semantic_review_010(args: argparse.Namespace) -> int:
         min_cowgirl_window_seconds=args.min_cowgirl_window_seconds,
         use_cowgirl_candidate_score_v2=_arg_bool(args.use_cowgirl_candidate_score_v2),
         use_cowgirl_candidate_score_v3=_arg_bool(args.use_cowgirl_candidate_score_v3),
+        use_cowgirl_candidate_score_v4=_arg_bool(args.use_cowgirl_candidate_score_v4),
         use_rider_receiver_discrimination=_arg_bool(args.use_rider_receiver_discrimination),
+        use_relative_motion_features=_arg_bool(args.use_relative_motion_features),
+        use_trajectory_shape_features=_arg_bool(args.use_trajectory_shape_features),
+        use_relative_reference_matches=_arg_bool(args.use_relative_reference_matches),
     )
     print(f"Semantic review 010 written: {args.out_dir}")
     print(f"Review items: {summary['review_items']}; categories={summary['category_distribution']}")
@@ -1381,6 +1513,14 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_score_rider_receiver_v1(args)
     if args.command == "score-cowgirl-candidates-v3":
         return cmd_score_cowgirl_candidates_v3(args)
+    if args.command == "build-relative-motion-windows":
+        return cmd_build_relative_motion_windows(args)
+    if args.command == "extract-relative-motion-features":
+        return cmd_extract_relative_motion_features(args)
+    if args.command == "analyze-trajectory-shapes":
+        return cmd_analyze_trajectory_shapes(args)
+    if args.command == "score-cowgirl-candidates-v4":
+        return cmd_score_cowgirl_candidates_v4(args)
     if args.command == "discover-controller-map":
         return cmd_discover_controller_map(args)
     if args.command == "extract-cowgirl-features-v1":
@@ -1389,10 +1529,14 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_import_handmade_reference_animations(args)
     if args.command == "extract-handmade-reference-features":
         return cmd_extract_handmade_reference_features(args)
+    if args.command == "build-handmade-relative-reference-features":
+        return cmd_build_handmade_relative_reference_features(args)
     if args.command == "build-handmade-reference-signatures":
         return cmd_build_handmade_reference_signatures(args)
     if args.command == "compare-wild-to-handmade-references":
         return cmd_compare_wild_to_handmade_references(args)
+    if args.command == "compare-relative-wild-to-handmade":
+        return cmd_compare_relative_wild_to_handmade(args)
     if args.command == "build-context-pair-candidates":
         return cmd_build_context_pairs(args)
     if args.command == "generate-weak-labels-v1":
