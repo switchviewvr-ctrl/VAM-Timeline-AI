@@ -507,41 +507,36 @@ python -m vam_timeline_ai.cli audit-data-integrity ^
   --strict true
 ```
 
-The recommended human review entry point is:
+Use `find-latest-review-batch` to discover the current human review entry point. Batch numbers are local workflow artifacts, not final truth:
 
-```text
-data\runs\clean_v2\labels\batches\batch_002\previews\index.html
+```powershell
+python -m vam_timeline_ai.cli find-latest-review-batch ^
+  --run-dir data\runs\clean_v2 ^
+  --out data\runs\clean_v2\labels\latest_review_batch_report.md
 ```
 
-The editable label stub is:
+Then write the exact human next-step file:
 
-```text
-data\runs\clean_v2\labels\batches\batch_002\manual_labels.stub.yaml
+```powershell
+python -m vam_timeline_ai.cli write-labeling-next-step ^
+  --run-dir data\runs\clean_v2 ^
+  --out data\runs\clean_v2\labels\human_labeling_next_step.md
 ```
 
-See [DATA_IDENTITY_AND_CLEAN_RUNS.md](references/DATA_IDENTITY_AND_CLEAN_RUNS.md) for the ID rules and clean rebuild workflow.
+See [DATA_IDENTITY_AND_CLEAN_RUNS.md](references/DATA_IDENTITY_AND_CLEAN_RUNS.md) and [LATEST_REVIEW_BATCH_WORKFLOW.md](references/LATEST_REVIEW_BATCH_WORKFLOW.md) for the ID rules and batch discovery workflow.
 
 ## Manual Label Ingestion
 
-After a human edits a review-batch stub, save it as `manual_labels.edited.yaml`, inspect it, then merge it into the run-local `manual_labels.yaml`.
+After a human edits the latest review-batch stub, save it as `manual_labels.edited.yaml` inside that batch folder. Then let the orchestration command discover and ingest the latest edited batch safely:
 
 ```powershell
-python -m vam_timeline_ai.cli inspect-edited-label-batch ^
-  --stub data\runs\clean_v2\labels\batches\batch_002\manual_labels.stub.yaml ^
-  --edited data\runs\clean_v2\labels\batches\batch_002\manual_labels.edited.yaml ^
-  --windows data\runs\clean_v2\semantic\movement_windows.jsonl ^
-  --pair-windows data\runs\clean_v2\semantic\pair_windows_v1.jsonl ^
-  --out data\runs\clean_v2\labels\batches\batch_002\edited_label_batch_inspection.md
-
-python -m vam_timeline_ai.cli merge-manual-label-batch ^
-  --base data\runs\clean_v2\labels\manual_labels.yaml ^
-  --batch data\runs\clean_v2\labels\batches\batch_002\manual_labels.edited.yaml ^
-  --out data\runs\clean_v2\labels\manual_labels.yaml ^
-  --backup true ^
-  --report data\runs\clean_v2\labels\manual_label_merge_report_batch_002.md
+python -m vam_timeline_ai.cli ingest-latest-edited-batch ^
+  --run-dir data\runs\clean_v2 ^
+  --schema data\labels\manual_labels.schema_v2.yaml ^
+  --stop-if-missing true
 ```
 
-Empty stubs are ignored. Weak labels are rejected as manual labels. Unknown IDs are treated as stale/non-clean-run references.
+If no edited labels exist, ingestion stops safely and writes `human_labeling_next_step.md`. Empty stubs are ignored. Weak labels are rejected as manual labels. Unknown IDs are treated as stale/non-clean-run references.
 
 Then rebuild the labeled windows and v2 dataset:
 
@@ -580,6 +575,20 @@ python -m vam_timeline_ai.cli analyze-supervised-readiness ^
 ```
 
 Supervised ML starts only if real manual labels are sufficient across grouped scenes/samples with negative/control examples. See [MANUAL_LABEL_INGESTION_AND_SUPERVISED_READINESS.md](references/MANUAL_LABEL_INGESTION_AND_SUPERVISED_READINESS.md), [SUPERVISED_BASELINE_V0.md](references/SUPERVISED_BASELINE_V0.md), and [ACTIVE_LABELING_BATCHES.md](references/ACTIVE_LABELING_BATCHES.md).
+
+## Public GitHub Safety
+
+This repository is public and should contain code, docs, tests, schemas, templates, and lightweight folder placeholders only. Generated local data, raw VaM scenes, baked arrays, previews, model files, and human labels must stay out of Git.
+
+Before pushing:
+
+```powershell
+python -m vam_timeline_ai.cli audit-repo-safety ^
+  --project-root . ^
+  --out data\runs\clean_v2\audits\repo_safety_report.md
+```
+
+See [GITHUB_REPO_DATA_SAFETY.md](references/GITHUB_REPO_DATA_SAFETY.md).
 
 ## Tests
 

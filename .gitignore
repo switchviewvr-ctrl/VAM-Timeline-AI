@@ -63,6 +63,23 @@ data/labels/manual_labels.yaml
 data/labels/**/*.edited.yaml
 data/labels/batches/
 data/runs/
+data/runs/**
+data/**/samples/
+data/**/samples/**
+data/**/previews/
+data/**/previews/**
+data/**/*.npz
+data/**/*.npy
+data/**/*.pkl
+data/**/*.joblib
+data/**/*.model
+data/**/*.onnx
+data/**/*.png
+data/**/*.jpg
+data/**/*.jpeg
+data/**/*.mp4
+data/**/*.webm
+data/**/*.var
 
 # Generated outputs / binary motion artifacts
 outputs/**
@@ -80,6 +97,9 @@ outputs/**
 *.gif
 *.mp4
 *.webm
+*.var
 
 # Logs and reports generated during local runs
 *.log
+logs/
+*.tmp

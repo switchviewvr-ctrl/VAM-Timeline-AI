@@ -42,6 +42,14 @@ def build_parser() -> argparse.ArgumentParser:
     state = subparsers.add_parser("audit-project-state", help="Write an honest capability/status report.")
     state.add_argument("--out", required=True)
 
+    repo_safety = subparsers.add_parser("audit-repo-safety", help="Audit public GitHub repo safety.")
+    repo_safety.add_argument("--project-root", required=True)
+    repo_safety.add_argument("--out", required=True)
+
+    local_status = subparsers.add_parser("local-status", help="Write local clean-run status for the human operator.")
+    local_status.add_argument("--run-dir", required=True)
+    local_status.add_argument("--out", required=True)
+
     clean = subparsers.add_parser("prepare-clean-run", help="Create clean run folders and a run manifest.")
     clean.add_argument("--data-root", required=True)
     clean.add_argument("--run-name", required=True)
@@ -264,6 +272,19 @@ def build_parser() -> argparse.ArgumentParser:
     active_batch.add_argument("--max-per-sample", type=int, default=3)
     active_batch.add_argument("--prefer-coverage-gaps", default="true")
 
+    latest_batch = subparsers.add_parser("find-latest-review-batch", help="Discover latest valid review batch from a clean run.")
+    latest_batch.add_argument("--run-dir", required=True)
+    latest_batch.add_argument("--out", required=True)
+
+    next_step = subparsers.add_parser("write-labeling-next-step", help="Write exact human next-step instructions for labeling.")
+    next_step.add_argument("--run-dir", required=True)
+    next_step.add_argument("--out", required=True)
+
+    ingest = subparsers.add_parser("ingest-latest-edited-batch", help="Safely ingest the latest edited review batch if it exists.")
+    ingest.add_argument("--run-dir", required=True)
+    ingest.add_argument("--schema", required=True)
+    ingest.add_argument("--stop-if-missing", default="true")
+
     return parser
 
 
@@ -318,6 +339,25 @@ def cmd_scan_raw_folder(args: argparse.Namespace) -> int:
             failures=totals["parse_failures"],
         )
     )
+    return 0
+
+
+def cmd_audit_repo_safety(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.repo_safety import audit_repo_safety
+
+    result = audit_repo_safety(args.project_root, args.out)
+    print(f"Repository safety report written: {args.out}")
+    print(f"Status: {result['status']}; errors={len(result['errors'])}; warnings={len(result['warnings'])}")
+    return 1 if result["status"] == "ERROR" else 0
+
+
+def cmd_local_status(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.local_status import write_local_status
+
+    result = write_local_status(args.run_dir, args.out)
+    print(f"Local status report written: {args.out}")
+    latest = result.get("latest_review_batch") or {}
+    print(f"Latest batch: {latest.get('batch_name')}; edited={latest.get('has_edited')}; manual labels={result['manual_label_count']}")
     return 0
 
 
@@ -694,6 +734,35 @@ def cmd_build_active_review_batch_v3(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_find_latest_review_batch(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.review_batch_discovery import find_latest_review_batch
+
+    result = find_latest_review_batch(args.run_dir, args.out)
+    latest = result.get("latest_batch") or {}
+    print(f"Latest review batch report written: {args.out}")
+    print(f"Status: {result['status']}; latest={latest.get('batch_name')}")
+    return 0
+
+
+def cmd_write_labeling_next_step(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.labeling_next_step import write_labeling_next_step
+
+    result = write_labeling_next_step(args.run_dir, args.out)
+    latest = result.get("latest_batch") or {}
+    print(f"Human labeling next-step report written: {args.out}")
+    print(f"Status: {result['status']}; latest={latest.get('batch_name')}")
+    return 0
+
+
+def cmd_ingest_latest_edited_batch(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.ingest_latest import ingest_latest_edited_batch
+
+    result = ingest_latest_edited_batch(args.run_dir, args.schema, stop_if_missing=_arg_bool(args.stop_if_missing))
+    print(f"Ingest latest edited batch status: {result['status']}")
+    print(result.get("message", ""))
+    return 0 if result["status"] in {"waiting_for_human_labels", "ingested", "no_valid_batch"} else 1
+
+
 def _arg_bool(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
@@ -736,6 +805,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_scan_raw_folder(args)
     if args.command == "audit-project-state":
         return cmd_audit_project_state(args)
+    if args.command == "audit-repo-safety":
+        return cmd_audit_repo_safety(args)
+    if args.command == "local-status":
+        return cmd_local_status(args)
     if args.command == "prepare-clean-run":
         return cmd_prepare_clean_run(args)
     if args.command == "build-motion-source-index":
@@ -802,6 +875,12 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_train_supervised_baseline_v0(args)
     if args.command == "build-active-review-batch-v3":
         return cmd_build_active_review_batch_v3(args)
+    if args.command == "find-latest-review-batch":
+        return cmd_find_latest_review_batch(args)
+    if args.command == "write-labeling-next-step":
+        return cmd_write_labeling_next_step(args)
+    if args.command == "ingest-latest-edited-batch":
+        return cmd_ingest_latest_edited_batch(args)
     parser.error(f"Unknown command: {args.command}")
     return 2
 

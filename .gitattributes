@@ -13,3 +13,8 @@
 *.gif binary
 *.mp4 binary
 *.webm binary
+*.pkl binary
+*.joblib binary
+*.model binary
+*.onnx binary
+*.var binary
