@@ -1,0 +1,963 @@
+"""Small VaM semantic review batches with guarded Timeline exports."""
+
+from __future__ import annotations
+
+from collections import Counter, defaultdict
+from pathlib import Path
+from typing import Any
+import csv
+import html
+import math
+
+import numpy as np
+import yaml
+
+from vam_timeline_ai.io.identity import stable_hash
+from vam_timeline_ai.io.json_utils import dump_json, load_jsonl, safe_id_for_path, write_jsonl
+from vam_timeline_ai.timeline.codec import TimelineKeyframe, decode_keyframe_sequence, encode_keyframe_sequence
+
+
+MOVEMENT_LABELS = {
+    "cowgirl_vertical_bounce",
+    "cowgirl_forward_back_rock",
+    "cowgirl_lateral_sway",
+    "cowgirl_circular_grind",
+    "cowgirl_fast_shallow",
+    "cowgirl_deep_slow",
+    "cowgirl_pause_hold",
+    "cowgirl_adjustment_transition",
+    "cowgirl_irregular_human_motion",
+}
+CONTACT_LABELS = {
+    "cowgirl_hand_supported_on_partner",
+    "cowgirl_hand_supported_on_partner_chest",
+    "cowgirl_hand_supported_on_partner_hips",
+    "rider_active",
+    "partner_context_static",
+}
+ROLE_LABELS = {"rider_active", "partner_context_static", "receiver_passive"}
+HIGH_RISK_EXPORT_SOURCE_TYPES = {"vam_native_motion_animation", "native_motion_animation"}
+LINEAR = 2
+
+
+def export_semantic_review_010(run_dir: str | Path, out_dir: str | Path, count: int = 10, attempt_timeline_export: bool = True) -> dict[str, Any]:
+    if count != 10:
+        raise ValueError("semantic review MVP expects exactly 10 items")
+    run = Path(run_dir)
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    data = _load_data(run)
+    selected = _select_10(data)
+    rows: list[dict[str, Any]] = []
+    export_results: list[dict[str, Any]] = []
+    timeline_root = out / "timeline_segments"
+    timeline_root.mkdir(parents=True, exist_ok=True)
+    for idx, item in enumerate(selected, start=1):
+        row = _make_review_row(idx, item, data)
+        if attempt_timeline_export:
+            export_result = _attempt_timeline_export(row, data, timeline_root / row["review_id"])
+        else:
+            export_result = _write_export_unavailable(timeline_root / row["review_id"], row, "timeline export disabled by command")
+        row["has_timeline_export"] = bool(export_result.get("success"))
+        row["timeline_export_path"] = export_result.get("timeline_export_path")
+        row["timeline_export_validation_status"] = export_result.get("validation_status", "unavailable")
+        row["timeline_export_warnings"] = export_result.get("warnings", [])
+        rows.append(row)
+        export_results.append(export_result)
+        _write_per_item_guess(out / row["review_id"], row)
+    write_jsonl(out / "semantic_review_010.jsonl", rows)
+    _write_markdown(rows, out / "semantic_review_010.md")
+    _write_csv(rows, out / "semantic_review_010.csv")
+    _write_answer_sheet_md(rows, out / "semantic_review_010_answer_sheet.md")
+    _write_answer_sheet_yaml(rows, out / "semantic_review_010_answer_sheet.yaml")
+    _write_index_html(rows, out / "semantic_review_010_index.html")
+    _write_timeline_export_status(rows, export_results, out / "timeline_segment_export_status.md")
+    summarize_semantic_review_010(out / "semantic_review_010_answer_sheet.yaml", out / "semantic_review_010.jsonl", out / "semantic_review_010_result.md")
+    return {
+        "status": "ok",
+        "review_items": len(rows),
+        "category_distribution": dict(Counter(r["category"] for r in rows)),
+        "pair_examples": sum(1 for r in rows if r.get("pair_window_id")),
+        "timeline_exports_attempted": sum(1 for r in export_results if r.get("attempted")),
+        "timeline_exports_successful": sum(1 for r in export_results if r.get("success")),
+        "timeline_exports_unavailable": sum(1 for r in export_results if not r.get("success")),
+        "manual_labels_modified": False,
+    }
+
+
+def summarize_semantic_review_010(answers: str | Path, review: str | Path, out: str | Path) -> dict[str, Any]:
+    answer_path = Path(answers)
+    rows = load_jsonl(review)
+    data = yaml.safe_load(answer_path.read_text(encoding="utf-8")) if answer_path.exists() else {}
+    reviews = (data or {}).get("reviews", {}) or {}
+    fields = [
+        "user_verdict",
+        "timeline_import_worked",
+        "original_scene_review_worked",
+        "active_rider_correct",
+        "movement_correct",
+        "contact_correct",
+        "timing_correct",
+        "timeline_export_correct",
+    ]
+    counts = {field: Counter() for field in fields}
+    false_labels: Counter[str] = Counter()
+    all_unknown = True
+    for rid, item in reviews.items():
+        if not isinstance(item, dict):
+            continue
+        for field in fields:
+            value = str(item.get(field, "unknown"))
+            counts[field][value] += 1
+            if value != "unknown":
+                all_unknown = False
+        false_labels.update(str(v) for v in item.get("false_system_labels", []) or [])
+        if item.get("actual_labels") or item.get("notes"):
+            all_unknown = False
+    status = "not_completed" if all_unknown or not reviews else "completed"
+    verdict = {
+        "data_extraction_trusted": _semantic_verdict(counts["original_scene_review_worked"], counts["timing_correct"]),
+        "timeline_export_trusted": _semantic_verdict(counts["timeline_import_worked"], counts["timeline_export_correct"]),
+        "feature_semantics_trusted": _semantic_verdict(counts["movement_correct"]),
+        "pair_contact_trusted": _semantic_verdict(counts["contact_correct"]),
+        "machine_labels_trusted_for_proxy_ml": _semantic_verdict(counts["user_verdict"]),
+    }
+    _write_semantic_result(Path(out), rows, status, counts, false_labels, verdict)
+    return {"status": status, "review_items": len(rows), "counts": {k: dict(v) for k, v in counts.items()}, "verdict": verdict}
+
+
+def _load_data(run: Path) -> dict[str, Any]:
+    return {
+        "run_dir": run,
+        "windows": {r.get("window_id"): r for r in load_jsonl(run / "semantic" / "movement_windows.jsonl") if r.get("window_id")},
+        "features": {r.get("window_id"): r for r in load_jsonl(run / "features" / "cowgirl_window_features_v1.jsonl") if r.get("window_id")},
+        "samples": {r.get("sample_id"): r for r in load_jsonl(run / "baked" / "motion_sample_index.jsonl") if r.get("sample_id")},
+        "weak": {r.get("window_id"): r for r in load_jsonl(run / "semantic" / "weak_labels_v2.jsonl") if r.get("window_id")},
+        "pair_windows": {r.get("pair_window_id"): r for r in load_jsonl(run / "semantic" / "pair_windows_v1.jsonl") if r.get("pair_window_id")},
+        "pair_by_window": _pair_by_window(load_jsonl(run / "semantic" / "pair_windows_v1.jsonl")),
+        "pair_features": {r.get("pair_window_id"): r for r in load_jsonl(run / "features" / "cowgirl_pair_features_v0.jsonl") if r.get("pair_window_id")},
+        "window_scores": _group_by(load_jsonl(run / "labels" / "machine_proposals" / "machine_window_label_scores_v2.jsonl"), "window_id"),
+        "pair_scores": _group_by(load_jsonl(run / "labels" / "machine_proposals" / "machine_pair_label_scores_v2.jsonl"), "pair_window_id"),
+        "silver_windows": {r.get("window_id"): r for r in load_jsonl(run / "labels" / "machine_proposals" / "silver_window_labels_v2.jsonl") if r.get("window_id")},
+        "silver_pairs": {r.get("pair_window_id"): r for r in load_jsonl(run / "labels" / "machine_proposals" / "silver_pair_labels_v2.jsonl") if r.get("pair_window_id")},
+        "baked_audit": {r.get("sample_id"): r for r in load_jsonl(run / "audits" / "baked_sample_audit.jsonl") if r.get("sample_id")},
+    }
+
+
+def _select_10(data: dict[str, Any]) -> list[dict[str, Any]]:
+    pools = {
+        "likely_positive": _positive_candidates(data),
+        "pair_contact": _pair_contact_candidates(data),
+        "suspicious_problem": _problem_candidates(data),
+        "negative_control": _negative_candidates(data),
+        "borderline_unclear": _borderline_candidates(data),
+    }
+    for rows in pools.values():
+        _enrich_candidates(rows, data)
+    quotas = {key: 2 for key in pools}
+    selected: list[dict[str, Any]] = []
+    seen_windows: set[str] = set()
+    per_scene: Counter[str] = Counter()
+    per_sample: Counter[str] = Counter()
+    for category, quota in quotas.items():
+        _take(pools[category], quota, selected, seen_windows, per_scene, per_sample, strict=True)
+    if len(selected) < 10:
+        _take([c for rows in pools.values() for c in rows], 10 - len(selected), selected, seen_windows, per_scene, per_sample, strict=False)
+    if len(selected) != 10:
+        raise ValueError(f"Could not select exactly 10 examples; selected {len(selected)}")
+    return selected
+
+
+def _positive_candidates(data: dict[str, Any]) -> list[dict[str, Any]]:
+    out = []
+    wanted = {"cowgirl_vertical_bounce", "cowgirl_forward_back_rock", "cowgirl_circular_grind"}
+    for wid, rows in data["window_scores"].items():
+        labels = {str(r.get("label")) for r in rows}
+        if not labels & wanted:
+            continue
+        score = max(float(r.get("final_score") or 0.0) for r in rows if r.get("label") in wanted)
+        out.append(_candidate("likely_positive", wid, None, score, ["high movement machine/silver candidate"], sorted(labels & wanted)))
+    return _sort_with_timeline_preference(out, data)
+
+
+def _pair_contact_candidates(data: dict[str, Any]) -> list[dict[str, Any]]:
+    out = []
+    for pid, rows in data["pair_scores"].items():
+        labels = {str(r.get("label")) for r in rows}
+        if not labels & CONTACT_LABELS:
+            continue
+        pair = data["pair_windows"].get(pid, {})
+        wid = _preferred_pair_window_id(pair, rows)
+        score = max(float(r.get("final_score") or 0.0) for r in rows)
+        out.append(_candidate("pair_contact", wid, pid, score, ["pair/contact or active-passive candidate"], sorted(labels & CONTACT_LABELS)))
+    return _sort_with_timeline_preference(out, data)
+
+
+def _problem_candidates(data: dict[str, Any]) -> list[dict[str, Any]]:
+    out = []
+    pair_context_counts = Counter()
+    for rows in data["pair_scores"].values():
+        for row in rows:
+            for wid in row.get("window_ids", []) or []:
+                pair_context_counts[str(wid)] += 1
+    for wid, rows in data["window_scores"].items():
+        labels = {str(r.get("label")) for r in rows}
+        reasons = []
+        if any(r.get("conflict_flags") or r.get("recommended_status") == "reject_conflict" for r in rows):
+            reasons.append("contradictory machine labels")
+        if pair_context_counts[wid] > 30:
+            reasons.append("many pair contexts")
+        frow = data["features"].get(wid, {})
+        if frow.get("missing_controller_groups") or (frow.get("feature_quality", {}) or {}).get("root_mapping_confidence") not in {"high", None}:
+            reasons.append("controller/axis feature ambiguity")
+        sample_audit = data["baked_audit"].get(frow.get("sample_id"), {})
+        if sample_audit.get("suspiciously_static") or sample_audit.get("suspiciously_huge_motion"):
+            reasons.append("baked sample audit warning")
+        if reasons:
+            out.append(_candidate("suspicious_problem", wid, None, float(len(rows) + pair_context_counts[wid]), reasons, sorted(labels)))
+    return _sort_with_timeline_preference(out, data)
+
+
+def _negative_candidates(data: dict[str, Any]) -> list[dict[str, Any]]:
+    out = []
+    for wid, frow in data["features"].items():
+        values = frow.get("feature_values", {}) or {}
+        energy = _num(values.get("pelvis_movement_energy"), 999.0)
+        speed = _num(values.get("pelvis_mean_speed"), 999.0)
+        pause = _num(values.get("pause_hold_score_proxy"), 0.0)
+        score = (1.0 - min(energy * 20.0, 1.0)) + (1.0 - min(speed * 8.0, 1.0)) + pause
+        if score > 1.0:
+            reasons = ["low pelvis/root motion or passive/static context candidate"]
+            if data["baked_audit"].get(frow.get("sample_id"), {}).get("suspiciously_static"):
+                reasons.append("suspicious static sample")
+            out.append(_candidate("negative_control", wid, None, score, reasons, []))
+    return _sort_with_timeline_preference(out, data)
+
+
+def _borderline_candidates(data: dict[str, Any]) -> list[dict[str, Any]]:
+    out = []
+    for wid, rows in data["window_scores"].items():
+        labels = {str(r.get("label")) for r in rows}
+        if not ({"cowgirl_adjustment_transition", "cowgirl_pause_hold", "cowgirl_irregular_human_motion"} & labels):
+            continue
+        scores = [float(r.get("final_score") or 0.0) for r in rows]
+        if any(0.55 <= s <= 0.82 for s in scores):
+            out.append(_candidate("borderline_unclear", wid, None, max(scores), ["medium-confidence transition/pause/unclear movement candidate"], sorted(labels & MOVEMENT_LABELS)))
+    return _sort_with_timeline_preference(out, data)
+
+
+def _candidate(category: str, wid: str, pid: str | None, score: float, reasons: list[str], labels: list[str]) -> dict[str, Any]:
+    return {"category": category, "window_id": wid, "pair_window_id": pid, "score": score, "why_selected": reasons, "labels": labels}
+
+
+def _enrich_candidates(candidates: list[dict[str, Any]], data: dict[str, Any]) -> None:
+    for item in candidates:
+        wrow = data["windows"].get(item.get("window_id"), {})
+        item["source_scene_file"] = wrow.get("source_scene_file")
+        item["sample_id"] = wrow.get("sample_id")
+
+
+def _sort_with_timeline_preference(items: list[dict[str, Any]], data: dict[str, Any]) -> list[dict[str, Any]]:
+    def key(item: dict[str, Any]) -> tuple[int, float]:
+        sample = _sample_for_window(item["window_id"], data)
+        timeline_safe = 1 if sample and sample.get("source_type") == "timeline_controller_motion" else 0
+        return (timeline_safe, float(item.get("score") or 0.0))
+    return sorted(items, key=key, reverse=True)
+
+
+def _take(candidates: list[dict[str, Any]], quota: int, selected: list[dict[str, Any]], seen: set[str], per_scene: Counter[str], per_sample: Counter[str], strict: bool) -> None:
+    added = 0
+    for item in candidates:
+        if added >= quota:
+            return
+        wid = item["window_id"]
+        if wid in seen:
+            continue
+        wrow = getattr(item, "_wrow", None)
+        scene = _get_window_scene(wid, item, wrow)
+        sample = _get_window_sample(wid, item, wrow)
+        if strict and (per_scene[scene] >= 2 or per_sample[sample] >= 1):
+            continue
+        if not strict and (per_scene[scene] >= 3 or per_sample[sample] >= 2):
+            continue
+        selected.append(item)
+        seen.add(wid)
+        per_scene[scene] += 1
+        per_sample[sample] += 1
+        added += 1
+
+
+def _make_review_row(idx: int, item: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+    wid = item["window_id"]
+    wrow = data["windows"].get(wid, {})
+    frow = data["features"].get(wid, {})
+    sample = data["samples"].get(wrow.get("sample_id") or frow.get("sample_id"), {})
+    pair = data["pair_windows"].get(item.get("pair_window_id")) if item.get("pair_window_id") else data["pair_by_window"].get(wid, {})
+    pair_feature = data["pair_features"].get(pair.get("pair_window_id"), {}) if pair else {}
+    pair_scores = data["pair_scores"].get(pair.get("pair_window_id"), []) if pair else []
+    window_scores = data["window_scores"].get(wid, [])
+    silver_window = data["silver_windows"].get(wid, {})
+    silver_pair = data["silver_pairs"].get(pair.get("pair_window_id"), {}) if pair else {}
+    review_id = f"review_{idx:03d}"
+    guess = _semantic_guess(item, frow, window_scores, pair_feature, pair_scores, silver_window, silver_pair)
+    pair_actor = _pair_actor(wid, pair)
+    return {
+        "review_id": review_id,
+        "source_scene_path": sample.get("source_scene_path") or wrow.get("source_scene_path"),
+        "source_scene_file": wrow.get("source_scene_file") or frow.get("source_scene_file") or sample.get("source_scene_file"),
+        "technical_atom_id": wrow.get("technical_atom_id") or frow.get("technical_atom_id") or sample.get("technical_atom_id"),
+        "pair_technical_atom_id": pair_actor,
+        "window_id": wid,
+        "pair_window_id": pair.get("pair_window_id") if pair else None,
+        "sample_id": wrow.get("sample_id") or frow.get("sample_id"),
+        "source_id": wrow.get("source_id") or frow.get("source_id"),
+        "start_seconds": wrow.get("start_seconds"),
+        "end_seconds": wrow.get("end_seconds"),
+        "duration_seconds": wrow.get("duration_seconds"),
+        "frame_start": wrow.get("frame_start"),
+        "frame_end": wrow.get("frame_end"),
+        "category": item["category"],
+        "has_timeline_export": False,
+        "timeline_export_path": None,
+        "timeline_export_validation_status": "not_attempted",
+        "timeline_export_warnings": [],
+        "system_semantic_guess": guess,
+        "evidence": {
+            "top_features": _top_features(frow.get("feature_values", {})),
+            "weak_labels": _weak_labels(data["weak"].get(wid, {})),
+            "machine_proposals": _score_hints(window_scores, 10),
+            "silver_labels": _silver_hint(silver_window),
+            "pair_feature_summary": _pair_summary(pair, pair_feature, pair_scores, silver_pair),
+        },
+        "why_selected": item["why_selected"],
+        "user_questions": _questions_for_item(bool(pair)),
+        "answer_options": ["correct", "wrong", "unclear"],
+        "is_human_ground_truth": False,
+    }
+
+
+def _semantic_guess(item: dict[str, Any], frow: dict[str, Any], scores: list[dict[str, Any]], pair_feature: dict[str, Any], pair_scores: list[dict[str, Any]], silver_window: dict[str, Any], silver_pair: dict[str, Any]) -> dict[str, Any]:
+    score_labels = [str(r.get("label")) for r in sorted(scores, key=lambda r: float(r.get("final_score") or 0.0), reverse=True)]
+    silver_labels = list(silver_window.get("positive_labels", []) or [])
+    movement_labels = [label for label in [*silver_labels, *score_labels, *item.get("labels", [])] if label in MOVEMENT_LABELS]
+    movement_labels = _dedupe(movement_labels)[:3]
+    pair_labels = [str(r.get("label")) for r in sorted(pair_scores, key=lambda r: float(r.get("final_score") or 0.0), reverse=True)]
+    contact_labels = [label for label in [*(silver_pair.get("positive_labels", []) or []), *pair_labels] if label in CONTACT_LABELS and label not in ROLE_LABELS]
+    role_labels = [label for label in [*score_labels, *pair_labels] if label in ROLE_LABELS]
+    values = frow.get("feature_values", {}) or {}
+    pair_q = pair_feature.get("feature_quality", {}) or {}
+    role_conf = _num(pair_q.get("active_actor_confidence"), 0.0)
+    move_conf = max([_num(r.get("final_score"), 0.0) for r in scores if r.get("label") in movement_labels] or [0.0])
+    contact_conf = max([_num(r.get("final_score"), 0.0) for r in pair_scores if r.get("label") in contact_labels] or [0.0])
+    active_candidate = "likely yes" if "rider_active" in role_labels or role_conf >= 0.65 else "unclear"
+    passive_candidate = "possible paired context" if "partner_context_static" in role_labels else "unclear"
+    posture = []
+    if _num(values.get("torso_lean_forward_proxy"), 0.5) > 0.7:
+        posture.append("lean_forward_proxy_uncertain")
+    if _num(values.get("torso_lean_back_proxy"), 0.5) > 0.7:
+        posture.append("lean_back_proxy_uncertain")
+    if not movement_labels and item["category"] == "negative_control":
+        movement_labels = ["low_motion_or_control_candidate"]
+    return {
+        "active_rider_candidate": active_candidate,
+        "passive_receiver_candidate": passive_candidate,
+        "movement_labels": movement_labels,
+        "contact_labels": _dedupe(contact_labels)[:3] or ["unclear"],
+        "posture_labels": posture or ["unclear"],
+        "role_confidence": round(float(role_conf), 3),
+        "movement_confidence": round(float(move_conf), 3),
+        "contact_confidence": round(float(contact_conf), 3),
+        "overall_confidence": round(float(max(role_conf, move_conf, contact_conf)), 3),
+        "warning": "Machine/weak/silver labels are hints only and not human truth.",
+    }
+
+
+def _attempt_timeline_export(row: dict[str, Any], data: dict[str, Any], out_dir: Path) -> dict[str, Any]:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    sample = data["samples"].get(row.get("sample_id"))
+    if not sample:
+        return _write_export_unavailable(out_dir, row, "sample record not found")
+    if sample.get("source_type") != "timeline_controller_motion":
+        reason = f"source_type is {sample.get('source_type')}; only timeline_controller_motion is exported by this guarded review tool"
+        return _write_export_unavailable(out_dir, row, reason)
+    if sample.get("source_type") in HIGH_RISK_EXPORT_SOURCE_TYPES:
+        return _write_export_unavailable(out_dir, row, "native/high-risk source type is not exported by default")
+    loaded = _load_npz_window(sample, row, data["run_dir"])
+    if loaded is None:
+        return _write_export_unavailable(out_dir, row, "baked NPZ missing or unreadable")
+    positions, rotations, names, times = loaded
+    if positions.size == 0 or rotations.size == 0:
+        return _write_export_unavailable(out_dir, row, "empty position/rotation arrays")
+    validation = _validate_arrays(positions, rotations)
+    if validation["status"] != "ok":
+        result = _write_export_unavailable(out_dir, row, f"numeric validation failed: {validation['warnings']}")
+        result["validation_status"] = validation["status"]
+        return result
+    duration = float(row.get("duration_seconds") or (times[-1] - times[0] if len(times) else 0.0))
+    timeline = _build_timeline_json(row["review_id"], duration, names, positions, rotations)
+    roundtrip = _validate_timeline_roundtrip(timeline, positions, rotations)
+    if roundtrip["status"] != "ok":
+        result = _write_export_unavailable(out_dir, row, f"roundtrip validation failed: {roundtrip['warnings']}")
+        result["validation_status"] = roundtrip["status"]
+        return result
+    timeline_path = out_dir / f"{row['review_id']}.timeline.json"
+    meta_path = out_dir / f"{row['review_id']}.timeline_meta.json"
+    notes_path = out_dir / f"{row['review_id']}_import_notes.md"
+    dump_json(timeline_path, timeline)
+    meta = {
+        "review_id": row["review_id"],
+        "window_id": row["window_id"],
+        "source_scene_file": row["source_scene_file"],
+        "source_scene_path": row["source_scene_path"],
+        "technical_atom_id": row["technical_atom_id"],
+        "source_id": row["source_id"],
+        "sample_id": row["sample_id"],
+        "original_start_seconds": row["start_seconds"],
+        "original_end_seconds": row["end_seconds"],
+        "exported_duration_seconds": duration,
+        "controller_names": names,
+        "export_format": "AcidBubbles Timeline-style JSON, dense linear keys",
+        "coordinate_space_assumption": "Original Timeline controller-space/control-space for the same source scene and atom; not retargeted.",
+        "validation_status": "ok",
+        "warnings": [
+            "VaM visual import has not been tested.",
+            "Use the original source scene/atom for safest review.",
+            "This export is a convenience segment, not proof of semantic correctness.",
+        ],
+        "import_instructions": "Open a copy of the source scene, select the listed technical atom, open AcidBubbles Timeline, and try importing the JSON segment if your Timeline version accepts this external format.",
+        "roundtrip": roundtrip,
+    }
+    dump_json(meta_path, meta)
+    _write_import_notes(notes_path, row, meta)
+    return {
+        "attempted": True,
+        "success": True,
+        "timeline_export_path": str(timeline_path),
+        "metadata_path": str(meta_path),
+        "validation_status": "ok",
+        "warnings": meta["warnings"],
+    }
+
+
+def _write_export_unavailable(out_dir: Path, row: dict[str, Any], reason: str) -> dict[str, Any]:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    lines = [
+        f"# Timeline Export Unavailable for {row['review_id']}",
+        "",
+        f"- Window: `{row.get('window_id')}`",
+        f"- Sample: `{row.get('sample_id')}`",
+        f"- Scene: `{row.get('source_scene_path') or row.get('source_scene_file')}`",
+        f"- Reason: {reason}",
+        "",
+        "Inspect this example in the original VaM scene/time instead. No substitute motion segment was created.",
+    ]
+    (out_dir / "export_unavailable.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return {"attempted": True, "success": False, "validation_status": "unavailable", "warnings": [reason], "timeline_export_path": None}
+
+
+def _load_npz_window(sample: dict[str, Any], row: dict[str, Any], run_dir: Path) -> tuple[np.ndarray, np.ndarray, list[str], np.ndarray] | None:
+    path = Path(str(sample.get("baked_npz_path") or ""))
+    if not path.is_absolute():
+        project_root = run_dir.parents[2] if len(run_dir.parents) > 2 else Path.cwd()
+        path = project_root / path if str(path).startswith("data") else run_dir / path
+    if not path.exists():
+        return None
+    with np.load(path, allow_pickle=True) as data:
+        positions = np.asarray(data["positions"], dtype=np.float32)
+        rotations = np.asarray(data["rotations"], dtype=np.float32)
+        times = np.asarray(data["times"], dtype=np.float32)
+        names = [str(x) for x in data["controller_names"].tolist()]
+    start = max(0, min(int(row.get("frame_start") or 0), len(times) - 1))
+    end = max(start + 1, min(int(row.get("frame_end") or len(times)), len(times)))
+    rel_times = times[start:end] - times[start]
+    return positions[start:end], _normalize_quat_continuity(rotations[start:end]), names, rel_times
+
+
+def _build_timeline_json(review_id: str, duration: float, names: list[str], positions: np.ndarray, rotations: np.ndarray) -> dict[str, Any]:
+    fps = 60.0
+    frame_times = [idx / fps for idx in range(positions.shape[0])]
+    duration = max(float(duration), frame_times[-1] if frame_times else 0.0)
+    controllers = []
+    for c_idx, name in enumerate(names):
+        controller = {
+            "Controller": name,
+            "TargetsPosition": True,
+            "TargetsRotation": True,
+            "ControlPosition": True,
+            "ControlRotation": True,
+        }
+        for axis_idx, axis in enumerate(["X", "Y", "Z"]):
+            values = [float(v) for v in positions[:, c_idx, axis_idx]]
+            controller[axis] = _encode_dense_values(frame_times, values, duration, values[-1] if values else 0.0)
+        for axis_idx, axis in enumerate(["RotX", "RotY", "RotZ", "RotW"]):
+            values = [float(v) for v in rotations[:, c_idx, axis_idx]]
+            controller[axis] = _encode_dense_values(frame_times, values, duration, values[-1] if values else (1.0 if axis == "RotW" else 0.0))
+        controllers.append(controller)
+    return {
+        "SerializeVersion": "283",
+        "AtomType": "Person",
+        "Clips": [
+            {
+                "AnimationName": review_id,
+                "AnimationLength": duration,
+                "BlendDuration": 0,
+                "Loop": 0,
+                "PreserveLastFrame": 1,
+                "LoopSelfBlendDuration": 0,
+                "NextAnimationRandomizeWeight": 1,
+                "AutoTransitionPrevious": 0,
+                "AutoTransitionNext": 0,
+                "SyncTransitionTime": 1,
+                "SyncTransitionTimeNL": 0,
+                "EnsureQuaternionContinuity": 1,
+                "AnimationLayer": "Main",
+                "Speed": 1,
+                "Weight": 1,
+                "Uninterruptible": 0,
+                "AnimationSegment": "SemanticReview",
+                "NextAnimationName": "",
+                "NextAnimationTime": duration,
+                "Controllers": controllers,
+            }
+        ],
+    }
+
+
+def _encode_dense_values(frame_times: list[float], values: list[float], duration: float, endpoint_value: float) -> list[str]:
+    keys = [TimelineKeyframe(float(t), float(v), LINEAR) for t, v in zip(frame_times, values)]
+    if not keys or abs(keys[-1].time - duration) > 1e-6:
+        keys.append(TimelineKeyframe(float(duration), float(endpoint_value), LINEAR))
+    return encode_keyframe_sequence(keys)
+
+
+def _validate_arrays(positions: np.ndarray, rotations: np.ndarray) -> dict[str, Any]:
+    warnings = []
+    if not np.isfinite(positions).all() or not np.isfinite(rotations).all():
+        warnings.append("NaN/Inf values found")
+    norms = np.linalg.norm(rotations, axis=-1)
+    if np.nanmin(norms) < 0.95 or np.nanmax(norms) > 1.05:
+        warnings.append("quaternion norms outside broad [0.95, 1.05] tolerance")
+    return {"status": "error" if warnings else "ok", "warnings": warnings}
+
+
+def _validate_timeline_roundtrip(timeline: dict[str, Any], positions: np.ndarray, rotations: np.ndarray) -> dict[str, Any]:
+    clip = timeline["Clips"][0]
+    version = int(timeline["SerializeVersion"])
+    max_pos_error = 0.0
+    min_rot_dot = 1.0
+    frame_times = np.asarray([idx / 60.0 for idx in range(positions.shape[0])], dtype=np.float32)
+    for c_idx, controller in enumerate(clip.get("Controllers", [])):
+        for axis_idx, axis in enumerate(["X", "Y", "Z"]):
+            values = _decode_values_at(controller[axis], version, frame_times)
+            max_pos_error = max(max_pos_error, float(np.max(np.abs(values - positions[:, c_idx, axis_idx]))))
+        rot_values = np.stack([_decode_values_at(controller[axis], version, frame_times) for axis in ["RotX", "RotY", "RotZ", "RotW"]], axis=1)
+        rot_values = _normalize_quat_continuity(rot_values[:, None, :])[:, 0, :]
+        dots = np.abs(np.sum(rot_values * rotations[:, c_idx, :], axis=1))
+        min_rot_dot = min(min_rot_dot, float(np.min(dots)))
+    warnings = []
+    if max_pos_error > 1e-4:
+        warnings.append(f"max position error {max_pos_error:.6g} > 1e-4")
+    if min_rot_dot < 0.999:
+        warnings.append(f"min rotation dot {min_rot_dot:.6g} < 0.999")
+    return {"status": "warning" if warnings else "ok", "max_position_abs_error": max_pos_error, "min_rotation_dot": min_rot_dot, "warnings": warnings}
+
+
+def _decode_values_at(keys: list[str], version: int, frame_times: np.ndarray) -> np.ndarray:
+    decoded = decode_keyframe_sequence(keys, version=version)
+    by_time = {round(k.time, 6): float(k.value) for k in decoded}
+    return np.asarray([by_time.get(round(float(t), 6), decoded[min(i, len(decoded) - 1)].value) for i, t in enumerate(frame_times)], dtype=np.float32)
+
+
+def _normalize_quat_continuity(rot: np.ndarray) -> np.ndarray:
+    out = np.asarray(rot, dtype=np.float32).copy()
+    norms = np.linalg.norm(out, axis=-1, keepdims=True)
+    norms = np.where(norms <= 1e-8, 1.0, norms)
+    out = out / norms
+    if out.ndim == 3:
+        for c_idx in range(out.shape[1]):
+            for i in range(1, out.shape[0]):
+                if float(np.dot(out[i - 1, c_idx], out[i, c_idx])) < 0:
+                    out[i, c_idx] *= -1.0
+    else:
+        for i in range(1, out.shape[0]):
+            if float(np.dot(out[i - 1], out[i])) < 0:
+                out[i] *= -1.0
+    return out
+
+
+def _write_import_notes(path: Path, row: dict[str, Any], meta: dict[str, Any]) -> None:
+    guess = row["system_semantic_guess"]
+    lines = [
+        f"# Import Notes for {row['review_id']}",
+        "",
+        f"- Source scene: `{row.get('source_scene_path')}`",
+        f"- Target technical atom: `{row.get('technical_atom_id')}`",
+        f"- Original time: {row.get('start_seconds')}s - {row.get('end_seconds')}s",
+        f"- Exported duration: {meta['exported_duration_seconds']:.3f}s",
+        f"- Timeline JSON: `{path.with_name(row['review_id'] + '.timeline.json')}`",
+        "",
+        "Use a copy of the source scene. Select the listed technical atom and use AcidBubbles Timeline if available.",
+        "",
+        "Timeline JSON was exported in project format, but manual VaM import steps may need verification. VaM visual import/playback has not been tested.",
+        "",
+        "## Expected System Guess",
+        "",
+        f"- Active rider candidate: {guess.get('active_rider_candidate')}",
+        f"- Movement: {', '.join(guess.get('movement_labels', []))}",
+        f"- Contact: {', '.join(guess.get('contact_labels', []))}",
+        f"- Overall confidence: {guess.get('overall_confidence')}",
+        "",
+        "Compare the imported segment and/or original scene playback against the semantic guess. Treat the export as a convenience only; original-scene review is the safest default.",
+    ]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_per_item_guess(item_dir: Path, row: dict[str, Any]) -> None:
+    item_dir.mkdir(parents=True, exist_ok=True)
+    dump_json(item_dir / f"{row['review_id']}_semantic_guess.json", row)
+    lines = _item_markdown(row)
+    (item_dir / f"{row['review_id']}_semantic_guess.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_markdown(rows: list[dict[str, Any]], out: Path) -> None:
+    lines = ["# VaM Semantic Review 010", "", "Review these 10 examples inside VaM. Machine/weak/silver labels are hints only.", ""]
+    for row in rows:
+        lines.extend(_item_markdown(row))
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _item_markdown(row: dict[str, Any]) -> list[str]:
+    guess = row["system_semantic_guess"]
+    evidence = row["evidence"]
+    return [
+        f"## {row['review_id']} - {row['category']}",
+        "",
+        f"- Scene: `{row.get('source_scene_path') or row.get('source_scene_file')}`",
+        f"- Original time: {row.get('start_seconds')}s - {row.get('end_seconds')}s",
+        f"- Technical actor: `{row.get('technical_atom_id')}`",
+        f"- Pair actor if any: `{row.get('pair_technical_atom_id')}`",
+        f"- Window: `{row.get('window_id')}`",
+        f"- Pair window: `{row.get('pair_window_id')}`",
+        f"- Timeline export: `{row.get('timeline_export_validation_status')}` {row.get('timeline_export_path') or ''}",
+        "",
+        "System's semantic guess:",
+        f"- active rider: {guess.get('active_rider_candidate')}",
+        f"- passive receiver/context: {guess.get('passive_receiver_candidate')}",
+        f"- movement: {', '.join(guess.get('movement_labels', []))}",
+        f"- contact: {', '.join(guess.get('contact_labels', []))}",
+        f"- posture: {', '.join(guess.get('posture_labels', []))}",
+        f"- confidence: role={guess.get('role_confidence')}, movement={guess.get('movement_confidence')}, contact={guess.get('contact_confidence')}, overall={guess.get('overall_confidence')}",
+        "",
+        "Why the system thinks this:",
+        f"- selected because: {'; '.join(row.get('why_selected', []))}",
+        f"- top features: `{_compact(evidence.get('top_features', {}))}`",
+        f"- weak hints: `{', '.join(item.get('label', '') for item in evidence.get('weak_labels', [])[:6])}`",
+        f"- machine proposals: `{', '.join(item.get('label', '') for item in evidence.get('machine_proposals', [])[:6])}`",
+        "",
+        "What to check in VaM:",
+        *[f"- {q}" for q in row.get("user_questions", [])],
+        "",
+    ]
+
+
+def _write_csv(rows: list[dict[str, Any]], out: Path) -> None:
+    with out.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["review_id", "category", "source_scene_file", "technical_atom_id", "start_seconds", "end_seconds", "movement_guess", "contact_guess", "timeline_export_validation_status", "timeline_export_path"])
+        writer.writeheader()
+        for row in rows:
+            guess = row["system_semantic_guess"]
+            writer.writerow({
+                "review_id": row["review_id"],
+                "category": row["category"],
+                "source_scene_file": row.get("source_scene_file"),
+                "technical_atom_id": row.get("technical_atom_id"),
+                "start_seconds": row.get("start_seconds"),
+                "end_seconds": row.get("end_seconds"),
+                "movement_guess": ", ".join(guess.get("movement_labels", [])),
+                "contact_guess": ", ".join(guess.get("contact_labels", [])),
+                "timeline_export_validation_status": row.get("timeline_export_validation_status"),
+                "timeline_export_path": row.get("timeline_export_path"),
+            })
+
+
+def _write_answer_sheet_md(rows: list[dict[str, Any]], out: Path) -> None:
+    lines = ["# Semantic Review 010 Answer Sheet", ""]
+    for row in rows:
+        lines.extend([
+            f"## {row['review_id']}",
+            "",
+            "- correct / wrong / unclear:",
+            "- if wrong, what is wrong:",
+            "- did Timeline import work:",
+            "- did original scene review work:",
+            "- what did you actually see:",
+            "- notes:",
+            "",
+        ])
+    out.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _write_answer_sheet_yaml(rows: list[dict[str, Any]], out: Path) -> None:
+    data = {"metadata": {"review_batch": "semantic_review_010", "is_training_label_file": False}, "reviews": {}}
+    for row in rows:
+        data["reviews"][row["review_id"]] = {
+            "user_verdict": "unknown",
+            "timeline_import_worked": "unknown",
+            "original_scene_review_worked": "unknown",
+            "active_rider_correct": "unknown",
+            "movement_correct": "unknown",
+            "contact_correct": "unknown",
+            "timing_correct": "unknown",
+            "timeline_export_correct": "unknown",
+            "actual_labels": [],
+            "false_system_labels": [],
+            "notes": "",
+        }
+    out.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8")
+
+
+def _write_index_html(rows: list[dict[str, Any]], out: Path) -> None:
+    cards = []
+    for row in rows:
+        guess = row["system_semantic_guess"]
+        evidence = html.escape(yaml.safe_dump(row["evidence"], sort_keys=False, allow_unicode=True))
+        answer = html.escape(yaml.safe_dump({"reviews": {row["review_id"]: _answer_stub()}}, sort_keys=False, allow_unicode=True))
+        export = row.get("timeline_export_path")
+        export_rel = f"timeline_segments/{row['review_id']}/{row['review_id']}.timeline.json"
+        export_link = f'<a href="{html.escape(export_rel)}">Timeline export</a>' if export else "Unavailable; inspect original scene"
+        cards.append(
+            f"<section><h2>{row['review_id']} - {html.escape(row['category'])}</h2>"
+            f"<p><b>Scene:</b> {html.escape(str(row.get('source_scene_path') or row.get('source_scene_file')))}<br>"
+            f"<b>Technical actor:</b> {html.escape(str(row.get('technical_atom_id')))}<br>"
+            f"<b>Pair actor:</b> {html.escape(str(row.get('pair_technical_atom_id')))}<br>"
+            f"<b>Time:</b> {row.get('start_seconds')}s - {row.get('end_seconds')}s<br>"
+            f"<b>Export:</b> {html.escape(str(row.get('timeline_export_validation_status')))} - {export_link}</p>"
+            f"<h3>System guess</h3><ul>"
+            f"<li>Active rider: {html.escape(str(guess.get('active_rider_candidate')))}</li>"
+            f"<li>Movement: {html.escape(', '.join(guess.get('movement_labels', [])))}</li>"
+            f"<li>Contact: {html.escape(', '.join(guess.get('contact_labels', [])))}</li>"
+            f"<li>Overall confidence: {guess.get('overall_confidence')}</li></ul>"
+            f"<p><b>Hints are not truth.</b> Machine/weak/silver labels must be checked in VaM.</p>"
+            f"<details><summary>Evidence</summary><pre>{evidence}</pre></details>"
+            f"<h3>What to check in VaM</h3><ul>{''.join('<li>' + html.escape(q) + '</li>' for q in row.get('user_questions', []))}</ul>"
+            f"<details open><summary>Answer YAML</summary><pre>{answer}</pre></details></section>"
+        )
+    html_text = """<!doctype html><meta charset='utf-8'><title>Semantic Review 010</title>
+<style>body{font-family:system-ui,Segoe UI,sans-serif;margin:1.5rem;background:#fafafa;color:#202020}section{background:white;border:1px solid #ddd;border-radius:6px;padding:1rem;margin:1rem 0}pre{white-space:pre-wrap;background:#f2f2f2;padding:.6rem;border-radius:4px}</style>
+<h1>VaM Semantic Review 010</h1><p>Review inside VaM. Hints are not truth. No ML training is implied.</p>
+""" + "\n".join(cards)
+    out.write_text(html_text, encoding="utf-8")
+
+
+def _write_timeline_export_status(rows: list[dict[str, Any]], results: list[dict[str, Any]], out: Path) -> None:
+    attempted = sum(1 for r in results if r.get("attempted"))
+    success = sum(1 for r in results if r.get("success"))
+    unavailable = [r for r in results if not r.get("success")]
+    reason_counts = Counter((r.get("warnings") or ["unknown"])[0] for r in unavailable)
+    lines = [
+        "# Timeline Segment Export Status",
+        "",
+        f"- Total review items: {len(rows)}",
+        f"- Exports attempted: {attempted}",
+        f"- Exports successful: {success}",
+        f"- Exports unavailable: {len(unavailable)}",
+        f"- Exports failed validation: {sum(1 for r in results if r.get('validation_status') not in {'ok', 'unavailable'})}",
+        "",
+        "## Unavailable Reasons",
+        "",
+    ]
+    lines.extend(f"- {reason}: {count}" for reason, count in reason_counts.items()) if reason_counts else lines.append("- None")
+    lines.extend(["", "## Inspect Original Scene Instead", ""])
+    for row in rows:
+        if not row.get("has_timeline_export"):
+            lines.append(f"- `{row['review_id']}`: `{row.get('source_scene_path') or row.get('source_scene_file')}` at {row.get('start_seconds')}s - {row.get('end_seconds')}s")
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_semantic_result(out: Path, rows: list[dict[str, Any]], status: str, counts: dict[str, Counter[str]], false_labels: Counter[str], verdict: dict[str, str]) -> None:
+    lines = ["# Semantic Review 010 Result", "", f"- Status: `{status}`", f"- Review items: {len(rows)}", ""]
+    if status == "not_completed":
+        lines.append("Answers are still unknown. Review is not completed yet.")
+    lines.extend(["", "## Counts", ""])
+    for field, counter in counts.items():
+        lines.append(f"### {field}")
+        lines.extend(f"- `{key}`: {value}" for key, value in counter.most_common())
+        lines.append("")
+    lines.extend(["## Common False Labels", ""])
+    lines.extend(f"- `{label}`: {count}" for label, count in false_labels.most_common()) if false_labels else lines.append("- None yet")
+    lines.extend(["", "## Verdict", ""])
+    lines.extend(f"- `{key}`: `{value}`" for key, value in verdict.items())
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _answer_stub() -> dict[str, Any]:
+    return {
+        "user_verdict": "unknown",
+        "timeline_import_worked": "unknown",
+        "original_scene_review_worked": "unknown",
+        "active_rider_correct": "unknown",
+        "movement_correct": "unknown",
+        "contact_correct": "unknown",
+        "timing_correct": "unknown",
+        "timeline_export_correct": "unknown",
+        "actual_labels": [],
+        "false_system_labels": [],
+        "notes": "",
+    }
+
+
+def _questions_for_item(has_pair: bool) -> list[str]:
+    base = [
+        "Is this actually the active rider or relevant actor?",
+        "Is the movement label plausible?",
+        "Is the original time window correct?",
+        "Does the movement match the feature evidence?",
+    ]
+    if has_pair:
+        base.extend([
+            "Is the pair context plausible?",
+            "Is the active/passive candidate plausible?",
+            "Does the hand/contact proxy look plausible?",
+        ])
+    base.append("Should this item be trusted for later ML work?")
+    return base
+
+
+def _pair_by_window(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    out = {}
+    for row in rows:
+        for key in ["window_id_a", "window_id_b"]:
+            wid = row.get(key)
+            if wid and wid not in out:
+                out[wid] = row
+    return out
+
+
+def _group_by(rows: list[dict[str, Any]], key: str) -> dict[str, list[dict[str, Any]]]:
+    out = defaultdict(list)
+    for row in rows:
+        if row.get(key):
+            out[str(row[key])].append(row)
+    return out
+
+
+def _preferred_pair_window_id(pair: dict[str, Any], rows: list[dict[str, Any]]) -> str:
+    score_window_ids = [wid for row in rows for wid in (row.get("window_ids") or [])]
+    for wid in score_window_ids:
+        if wid == pair.get("window_id_a"):
+            return wid
+    return pair.get("window_id_a") or (score_window_ids[0] if score_window_ids else "")
+
+
+def _pair_actor(wid: str, pair: dict[str, Any]) -> str | None:
+    if not pair:
+        return None
+    if pair.get("window_id_a") == wid:
+        return pair.get("technical_atom_id_b")
+    if pair.get("window_id_b") == wid:
+        return pair.get("technical_atom_id_a")
+    return None
+
+
+def _sample_for_window(wid: str, data: dict[str, Any]) -> dict[str, Any] | None:
+    wrow = data["windows"].get(wid, {})
+    return data["samples"].get(wrow.get("sample_id"))
+
+
+def _get_window_scene(wid: str, item: dict[str, Any], wrow: dict[str, Any] | None = None) -> str:
+    return str((wrow or {}).get("source_scene_file") or item.get("source_scene_file") or wid.split("_")[0])
+
+
+def _get_window_sample(wid: str, item: dict[str, Any], wrow: dict[str, Any] | None = None) -> str:
+    return str((wrow or {}).get("sample_id") or item.get("sample_id") or wid)
+
+
+def _top_features(values: dict[str, Any], limit: int = 10) -> dict[str, float]:
+    out = []
+    for key, value in values.items():
+        val = _num(value)
+        if val == val and not math.isinf(val):
+            out.append((key, abs(val), round(float(val), 6)))
+    return {key: val for key, _, val in sorted(out, key=lambda x: x[1], reverse=True)[:limit]}
+
+
+def _weak_labels(row: dict[str, Any]) -> list[dict[str, Any]]:
+    return [{"label": x.get("label"), "confidence": x.get("confidence"), "is_human_ground_truth": False} for x in row.get("weak_labels", [])[:8]]
+
+
+def _score_hints(rows: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    hints = []
+    seen = set()
+    for row in sorted(rows, key=lambda r: float(r.get("final_score") or 0.0), reverse=True):
+        label = row.get("label")
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        hints.append({
+            "label": label,
+            "score": row.get("final_score"),
+            "status": row.get("recommended_status"),
+            "conflict_flags": row.get("conflict_flags", []),
+            "is_human_ground_truth": False,
+        })
+        if len(hints) >= limit:
+            break
+    return hints
+
+
+def _silver_hint(row: dict[str, Any]) -> dict[str, Any]:
+    if not row:
+        return {}
+    return {
+        "positive_labels": row.get("positive_labels", []),
+        "review_only_labels": row.get("review_only_labels", []),
+        "scores_by_label": row.get("scores_by_label", {}),
+        "label_source": row.get("label_source", "silver_machine_v2"),
+        "is_human_ground_truth": False,
+    }
+
+
+def _pair_summary(pair: dict[str, Any], feature: dict[str, Any], scores: list[dict[str, Any]], silver: dict[str, Any]) -> dict[str, Any]:
+    if not pair:
+        return {}
+    return {
+        "pair_window_id": pair.get("pair_window_id"),
+        "pair_actor_a": pair.get("technical_atom_id_a"),
+        "pair_actor_b": pair.get("technical_atom_id_b"),
+        "pairing_reasons": pair.get("pairing_reasons", []),
+        "feature_quality": feature.get("feature_quality", {}),
+        "top_pair_features": _top_features(feature.get("feature_values", {}), 8),
+        "machine_pair_proposals": _score_hints(scores, 8),
+        "silver_pair_labels": _silver_hint(silver),
+        "warning": "Pair features are context proxies only, not semantic truth.",
+    }
+
+
+def _dedupe(items: list[str]) -> list[str]:
+    out = []
+    for item in items:
+        if item and item not in out:
+            out.append(item)
+    return out
+
+
+def _num(value: Any, default: float = float("nan")) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _compact(data: dict[str, Any], limit: int = 4) -> str:
+    return ", ".join(f"{k}={v}" for k, v in list(data.items())[:limit])
+
+
+def _semantic_verdict(*counters: Counter[str]) -> str:
+    yes = sum(c.get("correct", 0) + c.get("true", 0) + c.get("yes", 0) for c in counters)
+    no = sum(c.get("wrong", 0) + c.get("false", 0) + c.get("no", 0) for c in counters)
+    unclear = sum(c.get("unclear", 0) + c.get("unknown", 0) for c in counters)
+    if no > max(1, yes * 0.25):
+        return "no"
+    if yes >= max(3, no * 3) and yes > unclear:
+        return "yes"
+    return "uncertain"

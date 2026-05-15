@@ -60,6 +60,17 @@ def build_parser() -> argparse.ArgumentParser:
     reality_summary.add_argument("--audit-batch", required=True)
     reality_summary.add_argument("--out", required=True)
 
+    semantic_review = subparsers.add_parser("export-semantic-review-010", help="Export a 10-item VaM semantic review batch.")
+    semantic_review.add_argument("--run-dir", required=True)
+    semantic_review.add_argument("--out-dir", required=True)
+    semantic_review.add_argument("--count", type=int, default=10)
+    semantic_review.add_argument("--attempt-timeline-export", default="true")
+
+    semantic_summary = subparsers.add_parser("summarize-semantic-review-010", help="Summarize user answers for the 10-item semantic review.")
+    semantic_summary.add_argument("--answers", required=True)
+    semantic_summary.add_argument("--review", required=True)
+    semantic_summary.add_argument("--out", required=True)
+
     clean = subparsers.add_parser("prepare-clean-run", help="Create clean run folders and a run manifest.")
     clean.add_argument("--data-root", required=True)
     clean.add_argument("--run-name", required=True)
@@ -1091,6 +1102,30 @@ def cmd_summarize_reality_audit(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_export_semantic_review_010(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.semantic_review import export_semantic_review_010
+
+    summary = export_semantic_review_010(
+        args.run_dir,
+        args.out_dir,
+        count=args.count,
+        attempt_timeline_export=_arg_bool(args.attempt_timeline_export),
+    )
+    print(f"Semantic review 010 written: {args.out_dir}")
+    print(f"Review items: {summary['review_items']}; categories={summary['category_distribution']}")
+    print(f"Timeline exports: {summary['timeline_exports_successful']} successful / {summary['timeline_exports_attempted']} attempted")
+    return 0
+
+
+def cmd_summarize_semantic_review_010(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.semantic_review import summarize_semantic_review_010
+
+    summary = summarize_semantic_review_010(args.answers, args.review, args.out)
+    print(f"Semantic review 010 result written: {args.out}")
+    print(f"Status: {summary['status']}; review items={summary['review_items']}")
+    return 0
+
+
 def _arg_bool(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
@@ -1141,6 +1176,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_export_reality_audit_100(args)
     if args.command == "summarize-reality-audit":
         return cmd_summarize_reality_audit(args)
+    if args.command == "export-semantic-review-010":
+        return cmd_export_semantic_review_010(args)
+    if args.command == "summarize-semantic-review-010":
+        return cmd_summarize_semantic_review_010(args)
     if args.command == "prepare-clean-run":
         return cmd_prepare_clean_run(args)
     if args.command == "build-motion-source-index":
