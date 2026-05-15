@@ -216,6 +216,63 @@ python -m vam_timeline_ai.cli summarize-reality-audit ^
 
 Only continue toward labels or ML if the audit says data extraction, feature interpretation, and pair context are trustworthy enough.
 
+### Human Semantic Review Findings
+
+The first 10-item VaM semantic review showed that the machine/silver interpretation was not reliable enough for more ML. Only `review_010` was a clear Cowgirl segment. Several examples were transition/in-between motions, one looked head/BJ-domain rather than Cowgirl, and two were whole-controller/whole-person motion instead of real body/extremity animation.
+
+Those findings live under:
+
+```text
+data\runs\clean_v2\audits\semantic_review_010
+```
+
+They are audit findings only. They are not merged into `manual_labels.yaml` and are not training labels.
+
+### Body Motion Quality Gate
+
+Before trusting semantic guesses, audit whether each window contains real body-controller motion:
+
+```powershell
+python -m vam_timeline_ai.cli audit-body-motion-quality ^
+  --run-dir data\runs\clean_v2 ^
+  --sample-index data\runs\clean_v2\baked\motion_sample_index.jsonl ^
+  --features data\runs\clean_v2\features\cowgirl_window_features_v1.jsonl ^
+  --controller-map data\runs\clean_v2\semantic\controller_bodypart_map.json ^
+  --out-jsonl data\runs\clean_v2\audits\body_motion_quality.jsonl ^
+  --report data\runs\clean_v2\audits\body_motion_quality_report.md
+```
+
+Final generated VaM Timeline animation must never output Person/root/world transform motion. Only real bodypart controller tracks such as `hipControl`, `abdomenControl`, `chestControl`, `headControl`, hands, knees, feet, and thighs are valid animation targets.
+
+### Handmade Reference Animations
+
+The handmade reference ZIP calibrates Cowgirl vs BJ/head-dominant vs Doggy vs hand/head gesture motion:
+
+```powershell
+python -m vam_timeline_ai.cli import-handmade-reference-animations ^
+  --zip "G:\VAM\Saves\PluginData\animations\animations.zip" ^
+  --out-dir data\runs\clean_v2\references\handmade_animations
+```
+
+Filename labels are allowed only for this handmade reference set. They are not used as wild-scene semantic truth.
+
+### Safer Semantic Review V3
+
+After body-motion quality and handmade reference matching, export a new small VaM review:
+
+```powershell
+python -m vam_timeline_ai.cli export-semantic-review-010 ^
+  --run-dir data\runs\clean_v2 ^
+  --out-dir data\runs\clean_v2\audits\semantic_review_010_v3 ^
+  --count 10 ^
+  --attempt-timeline-export true ^
+  --use-body-motion-quality true ^
+  --prefer-clean-body-motion true ^
+  --use-handmade-reference-matches true
+```
+
+This is another semantic check, not training. Timeline exports strip unsafe Person/root/world tracks and write teleport-risk metadata. If no safe body-controller tracks remain, no fake export is created.
+
 ## Commands
 
 Print project and reference status:

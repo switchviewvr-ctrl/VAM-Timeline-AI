@@ -14,6 +14,9 @@ import yaml
 
 from vam_timeline_ai.io.identity import stable_hash
 from vam_timeline_ai.io.json_utils import dump_json, load_jsonl, safe_id_for_path, write_jsonl
+from vam_timeline_ai.references.handmade_parser import classify_timeline_target
+from vam_timeline_ai.semantics.domain_guards import evaluate_domain_guards
+from vam_timeline_ai.semantics.motion_phase_classifier import classify_motion_phase
 from vam_timeline_ai.timeline.codec import TimelineKeyframe, decode_keyframe_sequence, encode_keyframe_sequence
 
 
@@ -40,14 +43,27 @@ HIGH_RISK_EXPORT_SOURCE_TYPES = {"vam_native_motion_animation", "native_motion_a
 LINEAR = 2
 
 
-def export_semantic_review_010(run_dir: str | Path, out_dir: str | Path, count: int = 10, attempt_timeline_export: bool = True) -> dict[str, Any]:
+def export_semantic_review_010(
+    run_dir: str | Path,
+    out_dir: str | Path,
+    count: int = 10,
+    attempt_timeline_export: bool = True,
+    use_body_motion_quality: bool = False,
+    prefer_clean_body_motion: bool = False,
+    use_handmade_reference_matches: bool = False,
+) -> dict[str, Any]:
     if count != 10:
         raise ValueError("semantic review MVP expects exactly 10 items")
     run = Path(run_dir)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     data = _load_data(run)
-    selected = _select_10(data)
+    data["selection_flags"] = {
+        "use_body_motion_quality": use_body_motion_quality,
+        "prefer_clean_body_motion": prefer_clean_body_motion,
+        "use_handmade_reference_matches": use_handmade_reference_matches,
+    }
+    selected = _select_10_v3(data) if (use_body_motion_quality or use_handmade_reference_matches or prefer_clean_body_motion) else _select_10(data)
     rows: list[dict[str, Any]] = []
     export_results: list[dict[str, Any]] = []
     timeline_root = out / "timeline_segments"
@@ -141,6 +157,8 @@ def _load_data(run: Path) -> dict[str, Any]:
         "silver_windows": {r.get("window_id"): r for r in load_jsonl(run / "labels" / "machine_proposals" / "silver_window_labels_v2.jsonl") if r.get("window_id")},
         "silver_pairs": {r.get("pair_window_id"): r for r in load_jsonl(run / "labels" / "machine_proposals" / "silver_pair_labels_v2.jsonl") if r.get("pair_window_id")},
         "baked_audit": {r.get("sample_id"): r for r in load_jsonl(run / "audits" / "baked_sample_audit.jsonl") if r.get("sample_id")},
+        "body_quality": {r.get("window_id"): r for r in load_jsonl(run / "audits" / "body_motion_quality.jsonl") if r.get("window_id")},
+        "reference_matches": {r.get("window_id"): r for r in load_jsonl(run / "references" / "handmade_animations" / "wild_reference_matches.jsonl") if r.get("window_id")},
     }
 
 
@@ -163,6 +181,60 @@ def _select_10(data: dict[str, Any]) -> list[dict[str, Any]]:
         _take(pools[category], quota, selected, seen_windows, per_scene, per_sample, strict=True)
     if len(selected) < 10:
         _take([c for rows in pools.values() for c in rows], 10 - len(selected), selected, seen_windows, per_scene, per_sample, strict=False)
+    if len(selected) != 10:
+        raise ValueError(f"Could not select exactly 10 examples; selected {len(selected)}")
+    return selected
+
+
+def _select_10_v3(data: dict[str, Any]) -> list[dict[str, Any]]:
+    quotas = {
+        "likely_cowgirl_candidate": 3,
+        "transition_realign": 2,
+        "likely_head_bj_false_positive": 2,
+        "doggy_other_confusion": 1,
+        "isolated_gesture": 1,
+        "unknown_mess": 1,
+    }
+    pools = {key: [] for key in quotas}
+    for wid, frow in data["features"].items():
+        bq = data["body_quality"].get(wid, {})
+        match = data["reference_matches"].get(wid, {})
+        phase = classify_motion_phase(frow, bq)["motion_phase_candidate"]
+        guard = evaluate_domain_guards(frow, bq)
+        status = match.get("recommended_review_status")
+        cow_score = float(match.get("cowgirl_reference_score") or 0.0)
+        head_score = max(float(match.get("bj_reference_score") or 0.0), float(match.get("head_reference_score") or 0.0))
+        doggy_score = float(match.get("doggy_reference_score") or 0.0)
+        quality = bq.get("body_motion_quality", "unknown")
+        root_bad = quality in {"controller_only_whole_person_motion", "root_only_motion", "static_or_empty"}
+        if status == "likely_cowgirl_candidate" and not root_bad and phase != "transition_adjustment_candidate":
+            pools["likely_cowgirl_candidate"].append(_candidate("likely_cowgirl_candidate", wid, None, cow_score, ["high handmade cowgirl-reference score", f"body quality {quality}", f"phase {phase}"], ["cowgirl_reference_candidate"]))
+        if status == "likely_transition_or_realign" or phase == "transition_adjustment_candidate":
+            pools["transition_realign"].append(_candidate("transition_realign", wid, None, max(cow_score, 0.5), ["transition/realign-like motion", f"phase {phase}"], ["transition_adjustment_candidate"]))
+        if status == "likely_not_cowgirl_head_or_bj" or guard.get("domain_guard_audit_labels") == ["possible_non_cowgirl_head_dominant_motion"]:
+            pools["likely_head_bj_false_positive"].append(_candidate("likely_head_bj_false_positive", wid, None, head_score, ["head/BJ-domain guard candidate"], ["possible_non_cowgirl_head_dominant_motion"]))
+        if status == "likely_doggy_or_other_hip_motion":
+            pools["doggy_other_confusion"].append(_candidate("doggy_other_confusion", wid, None, doggy_score, ["doggy/other hip-motion confusion candidate"], ["likely_doggy_or_other_hip_motion"]))
+        if status == "likely_isolated_gesture":
+            pools["isolated_gesture"].append(_candidate("isolated_gesture", wid, None, max(head_score, float(match.get("hand_reference_score") or 0.0)), ["isolated hand/head gesture candidate"], ["likely_isolated_gesture"]))
+        if status in {"root_or_controller_only_false_positive", "unknown_needs_review"} or root_bad:
+            pools["unknown_mess"].append(_candidate("unknown_mess", wid, None, 1.0 if root_bad else 0.4, [f"quality/status needs audit: {quality}/{status}"], [status or quality]))
+    for rows in pools.values():
+        _enrich_candidates(rows, data)
+        rows.sort(key=lambda r: float(r.get("score") or 0.0), reverse=True)
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    per_scene: Counter[str] = Counter()
+    per_sample: Counter[str] = Counter()
+    for category, quota in quotas.items():
+        _take(pools[category], quota, selected, seen, per_scene, per_sample, strict=True)
+    if len(selected) < 10:
+        fallback = [c for rows in pools.values() for c in rows]
+        _take(fallback, 10 - len(selected), selected, seen, per_scene, per_sample, strict=False)
+    if len(selected) < 10:
+        fallback = _positive_candidates(data) + _borderline_candidates(data) + _negative_candidates(data)
+        _enrich_candidates(fallback, data)
+        _take(fallback, 10 - len(selected), selected, seen, per_scene, per_sample, strict=False)
     if len(selected) != 10:
         raise ValueError(f"Could not select exactly 10 examples; selected {len(selected)}")
     return selected
@@ -298,8 +370,12 @@ def _make_review_row(idx: int, item: dict[str, Any], data: dict[str, Any]) -> di
     window_scores = data["window_scores"].get(wid, [])
     silver_window = data["silver_windows"].get(wid, {})
     silver_pair = data["silver_pairs"].get(pair.get("pair_window_id"), {}) if pair else {}
+    body_quality = data["body_quality"].get(wid, {})
+    reference_match = data["reference_matches"].get(wid, {})
+    phase = classify_motion_phase(frow, body_quality)
+    guard = evaluate_domain_guards(frow, body_quality)
     review_id = f"review_{idx:03d}"
-    guess = _semantic_guess(item, frow, window_scores, pair_feature, pair_scores, silver_window, silver_pair)
+    guess = _semantic_guess(item, frow, window_scores, pair_feature, pair_scores, silver_window, silver_pair, body_quality, phase, guard, reference_match)
     pair_actor = _pair_actor(wid, pair)
     return {
         "review_id": review_id,
@@ -328,6 +404,10 @@ def _make_review_row(idx: int, item: dict[str, Any], data: dict[str, Any]) -> di
             "machine_proposals": _score_hints(window_scores, 10),
             "silver_labels": _silver_hint(silver_window),
             "pair_feature_summary": _pair_summary(pair, pair_feature, pair_scores, silver_pair),
+            "body_motion_quality": body_quality,
+            "motion_phase_candidate": phase,
+            "domain_guard_warnings": guard,
+            "handmade_reference_match": reference_match,
         },
         "why_selected": item["why_selected"],
         "user_questions": _questions_for_item(bool(pair)),
@@ -336,7 +416,19 @@ def _make_review_row(idx: int, item: dict[str, Any], data: dict[str, Any]) -> di
     }
 
 
-def _semantic_guess(item: dict[str, Any], frow: dict[str, Any], scores: list[dict[str, Any]], pair_feature: dict[str, Any], pair_scores: list[dict[str, Any]], silver_window: dict[str, Any], silver_pair: dict[str, Any]) -> dict[str, Any]:
+def _semantic_guess(
+    item: dict[str, Any],
+    frow: dict[str, Any],
+    scores: list[dict[str, Any]],
+    pair_feature: dict[str, Any],
+    pair_scores: list[dict[str, Any]],
+    silver_window: dict[str, Any],
+    silver_pair: dict[str, Any],
+    body_quality: dict[str, Any] | None = None,
+    phase: dict[str, Any] | None = None,
+    guard: dict[str, Any] | None = None,
+    reference_match: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     score_labels = [str(r.get("label")) for r in sorted(scores, key=lambda r: float(r.get("final_score") or 0.0), reverse=True)]
     silver_labels = list(silver_window.get("positive_labels", []) or [])
     movement_labels = [label for label in [*silver_labels, *score_labels, *item.get("labels", [])] if label in MOVEMENT_LABELS]
@@ -358,6 +450,19 @@ def _semantic_guess(item: dict[str, Any], frow: dict[str, Any], scores: list[dic
         posture.append("lean_back_proxy_uncertain")
     if not movement_labels and item["category"] == "negative_control":
         movement_labels = ["low_motion_or_control_candidate"]
+    body_quality = body_quality or {}
+    phase = phase or {}
+    guard = guard or {}
+    reference_match = reference_match or {}
+    multiplier = float(guard.get("cowgirl_confidence_multiplier") or 1.0)
+    if body_quality.get("body_motion_quality") in {"controller_only_whole_person_motion", "root_only_motion"}:
+        active_candidate = "unsafe/root-motion only; not valid rider output"
+        movement_labels = ["root_only_motion_false_positive" if body_quality.get("body_motion_quality") == "root_only_motion" else "controller_only_whole_person_motion"]
+        move_conf *= multiplier
+        role_conf *= multiplier
+    if "possible_non_cowgirl_head_dominant_motion" in guard.get("domain_guard_audit_labels", []):
+        movement_labels = _dedupe(["possible_non_cowgirl_head_dominant_motion", *movement_labels])[:3]
+        move_conf *= multiplier
     return {
         "active_rider_candidate": active_candidate,
         "passive_receiver_candidate": passive_candidate,
@@ -368,6 +473,11 @@ def _semantic_guess(item: dict[str, Any], frow: dict[str, Any], scores: list[dic
         "movement_confidence": round(float(move_conf), 3),
         "contact_confidence": round(float(contact_conf), 3),
         "overall_confidence": round(float(max(role_conf, move_conf, contact_conf)), 3),
+        "body_motion_quality": body_quality.get("body_motion_quality", "unknown"),
+        "motion_phase_candidate": phase.get("motion_phase_candidate", "unknown_phase"),
+        "domain_guard_warnings": guard.get("domain_guard_warnings", []),
+        "reference_review_status": reference_match.get("recommended_review_status"),
+        "nearest_handmade_reference_families": reference_match.get("nearest_reference_families", []),
         "warning": "Machine/weak/silver labels are hints only and not human truth.",
     }
 
@@ -386,6 +496,9 @@ def _attempt_timeline_export(row: dict[str, Any], data: dict[str, Any], out_dir:
     if loaded is None:
         return _write_export_unavailable(out_dir, row, "baked NPZ missing or unreadable")
     positions, rotations, names, times = loaded
+    positions, rotations, names, safety = _filter_safe_export_controllers(positions, rotations, names)
+    if not names:
+        return _write_export_unavailable(out_dir, row, "no allowed bodypart controller tracks remain after stripping Person/root/world tracks")
     if positions.size == 0 or rotations.size == 0:
         return _write_export_unavailable(out_dir, row, "empty position/rotation arrays")
     validation = _validate_arrays(positions, rotations)
@@ -418,6 +531,12 @@ def _attempt_timeline_export(row: dict[str, Any], data: dict[str, Any], out_dir:
         "controller_names": names,
         "export_format": "AcidBubbles Timeline-style JSON, dense linear keys",
         "coordinate_space_assumption": "Original Timeline controller-space/control-space for the same source scene and atom; not retargeted.",
+        "exported_controller_count": len(names),
+        "stripped_world_transform_count": safety["stripped_world_transform_count"],
+        "stripped_atom_root_count": safety["stripped_atom_root_count"],
+        "teleport_risk": safety["teleport_risk"],
+        "export_safe_for_import": safety["export_safe_for_import"],
+        "timeline_export_safe_for_animation": safety["timeline_export_safe_for_animation"],
         "validation_status": "ok",
         "warnings": [
             "VaM visual import has not been tested.",
@@ -426,6 +545,7 @@ def _attempt_timeline_export(row: dict[str, Any], data: dict[str, Any], out_dir:
         ],
         "import_instructions": "Open a copy of the source scene, select the listed technical atom, open AcidBubbles Timeline, and try importing the JSON segment if your Timeline version accepts this external format.",
         "roundtrip": roundtrip,
+        "safety": safety,
     }
     dump_json(meta_path, meta)
     _write_import_notes(notes_path, row, meta)
@@ -437,6 +557,43 @@ def _attempt_timeline_export(row: dict[str, Any], data: dict[str, Any], out_dir:
         "validation_status": "ok",
         "warnings": meta["warnings"],
     }
+
+
+def _filter_safe_export_controllers(positions: np.ndarray, rotations: np.ndarray, names: list[str]) -> tuple[np.ndarray, np.ndarray, list[str], dict[str, Any]]:
+    safe_indices: list[int] = []
+    stripped_root = 0
+    stripped_world = 0
+    for idx, name in enumerate(names):
+        kind = classify_timeline_target(name)
+        if kind == "allowed_body_controller":
+            safe_indices.append(idx)
+        elif "world" in str(name).lower():
+            stripped_world += 1
+        else:
+            stripped_root += 1
+    safe_names = [names[i] for i in safe_indices]
+    if safe_indices:
+        safe_positions = positions[:, safe_indices, :]
+        safe_rotations = rotations[:, safe_indices, :]
+    else:
+        safe_positions = positions[:, :0, :]
+        safe_rotations = rotations[:, :0, :]
+    moving = 0
+    if safe_positions.size:
+        ranges = np.nanmax(safe_positions, axis=0) - np.nanmin(safe_positions, axis=0)
+        moving = int(np.sum(np.linalg.norm(ranges, axis=1) > 1e-5))
+    teleport_risk = "low" if stripped_root == 0 and stripped_world == 0 else ("medium" if safe_names else "high")
+    safety = {
+        "exported_controller_count": len(safe_names),
+        "stripped_world_transform_count": stripped_world,
+        "stripped_atom_root_count": stripped_root,
+        "coordinate_space_assumption": "Allowed bodypart controller tracks only; Person/root/world tracks stripped.",
+        "teleport_risk": teleport_risk,
+        "export_safe_for_import": bool(safe_names) and teleport_risk in {"low", "medium"},
+        "timeline_export_safe_for_animation": bool(safe_names) and moving >= 1,
+        "stripped_controller_names": [name for idx, name in enumerate(names) if idx not in safe_indices],
+    }
+    return safe_positions, safe_rotations, safe_names, safety
 
 
 def _write_export_unavailable(out_dir: Path, row: dict[str, Any], reason: str) -> dict[str, Any]:
@@ -646,6 +803,10 @@ def _item_markdown(row: dict[str, Any]) -> list[str]:
         f"- movement: {', '.join(guess.get('movement_labels', []))}",
         f"- contact: {', '.join(guess.get('contact_labels', []))}",
         f"- posture: {', '.join(guess.get('posture_labels', []))}",
+        f"- body motion quality: {guess.get('body_motion_quality')}",
+        f"- phase: {guess.get('motion_phase_candidate')}",
+        f"- reference status: {guess.get('reference_review_status')}",
+        f"- domain warnings: {', '.join(guess.get('domain_guard_warnings', [])) or 'none'}",
         f"- confidence: role={guess.get('role_confidence')}, movement={guess.get('movement_confidence')}, contact={guess.get('contact_confidence')}, overall={guess.get('overall_confidence')}",
         "",
         "Why the system thinks this:",
@@ -653,6 +814,7 @@ def _item_markdown(row: dict[str, Any]) -> list[str]:
         f"- top features: `{_compact(evidence.get('top_features', {}))}`",
         f"- weak hints: `{', '.join(item.get('label', '') for item in evidence.get('weak_labels', [])[:6])}`",
         f"- machine proposals: `{', '.join(item.get('label', '') for item in evidence.get('machine_proposals', [])[:6])}`",
+        f"- handmade reference match: `{_compact(evidence.get('handmade_reference_match', {}), 6)}`",
         "",
         "What to check in VaM:",
         *[f"- {q}" for q in row.get("user_questions", [])],
@@ -711,6 +873,7 @@ def _write_answer_sheet_yaml(rows: list[dict[str, Any]], out: Path) -> None:
             "timeline_export_correct": "unknown",
             "actual_labels": [],
             "false_system_labels": [],
+            "trust_for_ml": "unknown",
             "notes": "",
         }
     out.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8")
@@ -736,6 +899,9 @@ def _write_index_html(rows: list[dict[str, Any]], out: Path) -> None:
             f"<li>Active rider: {html.escape(str(guess.get('active_rider_candidate')))}</li>"
             f"<li>Movement: {html.escape(', '.join(guess.get('movement_labels', [])))}</li>"
             f"<li>Contact: {html.escape(', '.join(guess.get('contact_labels', [])))}</li>"
+            f"<li>Body quality: {html.escape(str(guess.get('body_motion_quality')))}</li>"
+            f"<li>Phase: {html.escape(str(guess.get('motion_phase_candidate')))}</li>"
+            f"<li>Reference status: {html.escape(str(guess.get('reference_review_status')))}</li>"
             f"<li>Overall confidence: {guess.get('overall_confidence')}</li></ul>"
             f"<p><b>Hints are not truth.</b> Machine/weak/silver labels must be checked in VaM.</p>"
             f"<details><summary>Evidence</summary><pre>{evidence}</pre></details>"
@@ -785,6 +951,37 @@ def _write_semantic_result(out: Path, rows: list[dict[str, Any]], status: str, c
         lines.append("")
     lines.extend(["## Common False Labels", ""])
     lines.extend(f"- `{label}`: {count}" for label, count in false_labels.most_common()) if false_labels else lines.append("- None yet")
+    labels = Counter()
+    try:
+        answer_data = yaml.safe_load(out.with_name("semantic_review_010_answer_sheet.yaml").read_text(encoding="utf-8")) or {}
+        for item in (answer_data.get("reviews") or {}).values():
+            labels.update(str(x) for x in item.get("actual_labels", []) or [])
+    except Exception:
+        labels = Counter()
+    if labels:
+        cowgirl_true = labels.get("cowgirl_true_segment", 0)
+        transition = labels.get("transition_adjustment", 0)
+        root_false = labels.get("controller_only_whole_person_motion", 0) + labels.get("root_only_motion_false_positive", 0)
+        if cowgirl_true <= 1 and len(rows) >= 10:
+            verdict.update(
+                {
+                    "feature_semantics_trusted": "no",
+                    "machine_labels_trusted_for_proxy_ml": "no",
+                    "proceed_to_ml": "no",
+                }
+            )
+        lines.extend(
+            [
+                "## Human Review Interpretation",
+                "",
+                f"- Clear true Cowgirl positives: {cowgirl_true}/{len(rows)}",
+                f"- Transition/adjustment/in-between examples: {transition}",
+                f"- Whole-person/controller/root false positives: {root_false}",
+                "- Semantic trust is low; machine/silver labels are not ready for ML.",
+                "- Required fixes: detect root/controller-only motion, reduce transition false positives, add domain guards, and calibrate against handmade references.",
+                "",
+            ]
+        )
     lines.extend(["", "## Verdict", ""])
     lines.extend(f"- `{key}`: `{value}`" for key, value in verdict.items())
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -802,6 +999,7 @@ def _answer_stub() -> dict[str, Any]:
         "timeline_export_correct": "unknown",
         "actual_labels": [],
         "false_system_labels": [],
+        "trust_for_ml": "unknown",
         "notes": "",
     }
 

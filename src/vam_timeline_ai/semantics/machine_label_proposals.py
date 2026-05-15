@@ -15,6 +15,9 @@ import yaml
 
 from vam_timeline_ai.io.identity import stable_hash
 from vam_timeline_ai.io.json_utils import load_jsonl, write_jsonl
+from vam_timeline_ai.audits.body_motion_quality import body_motion_quality_for_feature
+from vam_timeline_ai.semantics.domain_guards import evaluate_domain_guards
+from vam_timeline_ai.semantics.motion_phase_classifier import classify_motion_phase
 from vam_timeline_ai.semantics.machine_label_schema import MachineLabelProposal
 
 
@@ -75,23 +78,35 @@ def _window_proposals(row: dict[str, Any], window: dict[str, Any], weak: dict[st
     rock = _f(v, "pelvis_rock_score_proxy")
     torso_forward = _f(v, "torso_lean_forward_proxy")
     torso_back = _f(v, "torso_lean_back_proxy")
+    body = body_motion_quality_for_feature(row, {}, {})
+    phase = classify_motion_phase(row, body)
+    guard = evaluate_domain_guards(row, body)
+    body_quality = body.get("body_motion_quality")
+    if body_quality in {"controller_only_whole_person_motion", "root_only_motion"}:
+        label = "controller_only_whole_person_motion" if body_quality == "controller_only_whole_person_motion" else "root_only_motion_false_positive"
+        out.append(_proposal(meta, label, "quality", "negative", 0.86, "machine_rule_v1", "root_or_controller_only_safety_gate_v1", ["pelvis_movement_energy", "left_hand_motion_energy", "right_hand_motion_energy", "head_motion_energy"], v, warnings + body.get("warnings", [])))
+        return out
+    if "possible_non_cowgirl_head_dominant_motion" in guard.get("domain_guard_audit_labels", []):
+        out.append(_proposal(meta, "possible_non_cowgirl_head_dominant_motion", "quality", "uncertain", 0.72, "machine_rule_v1", "head_dominant_domain_guard_v1", ["head_motion_energy", "pelvis_movement_energy"], v, warnings + guard.get("domain_guard_warnings", [])))
+    if phase.get("motion_phase_candidate") == "transition_adjustment_candidate":
+        out.append(_proposal(meta, "transition_adjustment", "quality", "uncertain", 0.7, "machine_rule_v1", "motion_phase_transition_gate_v1", ["irregular_rhythm_score_proxy", "pelvis_acceleration_peak_count"], v, warnings + ["Transition/adjustment is not clean Cowgirl."]))
 
     if vertical >= thresholds["p80"].get("pelvis_vertical_amplitude", np.inf) and vertical > max(fb, lat) * 1.15 and energy > thresholds["p50"].get("pelvis_movement_energy", 0):
-        out.append(_proposal(meta, "cowgirl_vertical_bounce", "movement", "positive", _conf(vertical, thresholds, "pelvis_vertical_amplitude", weak_names, "weak_v2_high_vertical_motion"), "machine_rule_v1", "pelvis_vertical_dominant_v1", ["pelvis_vertical_amplitude", "pelvis_movement_energy"], v, warnings))
+        out.append(_proposal(meta, "cowgirl_vertical_bounce", "movement", "positive", _gate_conf(_conf(vertical, thresholds, "pelvis_vertical_amplitude", weak_names, "weak_v2_high_vertical_motion"), body, phase, guard), "machine_rule_v1", "pelvis_vertical_dominant_v1", ["pelvis_vertical_amplitude", "pelvis_movement_energy"], v, warnings + guard.get("domain_guard_warnings", [])))
     if fb >= thresholds["p80"].get("pelvis_forward_back_amplitude", np.inf) and fb > lat * 1.2 and rock >= thresholds["p50"].get("pelvis_rock_score_proxy", 0):
-        out.append(_proposal(meta, "cowgirl_forward_back_rock", "movement", "positive", _conf(fb, thresholds, "pelvis_forward_back_amplitude", weak_names, "weak_v2_forward_back_dominant"), "machine_rule_v1", "pelvis_forward_back_dominant_v1", ["pelvis_forward_back_amplitude", "pelvis_rock_score_proxy"], v, warnings))
+        out.append(_proposal(meta, "cowgirl_forward_back_rock", "movement", "positive", _gate_conf(_conf(fb, thresholds, "pelvis_forward_back_amplitude", weak_names, "weak_v2_forward_back_dominant"), body, phase, guard), "machine_rule_v1", "pelvis_forward_back_dominant_v1", ["pelvis_forward_back_amplitude", "pelvis_rock_score_proxy"], v, warnings + guard.get("domain_guard_warnings", [])))
     if lat >= thresholds["p80"].get("pelvis_lateral_amplitude", np.inf) and lat > fb * 1.15:
-        out.append(_proposal(meta, "cowgirl_lateral_sway", "movement", "positive", _conf(lat, thresholds, "pelvis_lateral_amplitude", weak_names, "weak_v2_lateral_dominant"), "machine_rule_v1", "pelvis_lateral_dominant_v1", ["pelvis_lateral_amplitude"], v, warnings))
+        out.append(_proposal(meta, "cowgirl_lateral_sway", "movement", "positive", _gate_conf(_conf(lat, thresholds, "pelvis_lateral_amplitude", weak_names, "weak_v2_lateral_dominant"), body, phase, guard), "machine_rule_v1", "pelvis_lateral_dominant_v1", ["pelvis_lateral_amplitude"], v, warnings + guard.get("domain_guard_warnings", [])))
     if circular >= thresholds["p80"].get("pelvis_circularity_score_proxy", np.inf) and grind >= thresholds["p70"].get("pelvis_grind_score_proxy", 0) and min(fb, lat) > 0:
-        out.append(_proposal(meta, "cowgirl_circular_grind", "movement", "positive", _mean_conf([_conf(circular, thresholds, "pelvis_circularity_score_proxy", weak_names, "weak_v2_circular_grind_candidate"), _conf(grind, thresholds, "pelvis_grind_score_proxy", weak_names, "weak_v2_circular_grind_candidate")]), "machine_rule_v1", "pelvis_circular_grind_proxy_v1", ["pelvis_circularity_score_proxy", "pelvis_grind_score_proxy"], v, warnings))
+        out.append(_proposal(meta, "cowgirl_circular_grind", "movement", "positive", _gate_conf(_mean_conf([_conf(circular, thresholds, "pelvis_circularity_score_proxy", weak_names, "weak_v2_circular_grind_candidate"), _conf(grind, thresholds, "pelvis_grind_score_proxy", weak_names, "weak_v2_circular_grind_candidate")]), body, phase, guard), "machine_rule_v1", "pelvis_circular_grind_proxy_v1", ["pelvis_circularity_score_proxy", "pelvis_grind_score_proxy"], v, warnings + guard.get("domain_guard_warnings", [])))
     if pause >= thresholds["p85"].get("pause_hold_score_proxy", np.inf) and mean_speed <= thresholds["p35"].get("pelvis_mean_speed", np.inf):
         out.append(_proposal(meta, "cowgirl_pause_hold", "movement", "positive", _conf(pause, thresholds, "pause_hold_score_proxy", weak_names, "weak_v2_pause_hold_candidate"), "machine_rule_v1", "pause_hold_low_speed_v1", ["pause_hold_score_proxy", "pelvis_mean_speed"], v, warnings))
     if irregular >= thresholds["p85"].get("irregular_rhythm_score_proxy", np.inf) or accel >= thresholds["p90"].get("pelvis_acceleration_peak_count", np.inf):
         out.append(_proposal(meta, "cowgirl_adjustment_transition", "movement", "positive", _mean_conf([_conf(irregular, thresholds, "irregular_rhythm_score_proxy", weak_names, "weak_v2_irregular_motion_candidate"), _conf(accel, thresholds, "pelvis_acceleration_peak_count", weak_names, None)]), "machine_rule_v1", "irregular_acceleration_transition_v1", ["irregular_rhythm_score_proxy", "pelvis_acceleration_peak_count"], v, warnings))
     if slow >= thresholds["p75"].get("slow_motion_score_proxy", np.inf) and fast < thresholds["p60"].get("fast_motion_score_proxy", np.inf) and max(vertical, fb, lat, depth) >= thresholds["p60"].get("pelvis_total_position_range", 0):
-        out.append(_proposal(meta, "cowgirl_deep_slow", "movement", "positive", _conf(slow, thresholds, "slow_motion_score_proxy", weak_names, "weak_v2_slow_motion_candidate"), "machine_rule_v1", "slow_deep_proxy_v1", ["slow_motion_score_proxy", "pelvis_total_position_range"], v, warnings))
+        out.append(_proposal(meta, "cowgirl_deep_slow", "movement", "positive", _gate_conf(_conf(slow, thresholds, "slow_motion_score_proxy", weak_names, "weak_v2_slow_motion_candidate"), body, phase, guard), "machine_rule_v1", "slow_deep_proxy_v1", ["slow_motion_score_proxy", "pelvis_total_position_range"], v, warnings + guard.get("domain_guard_warnings", [])))
     if fast >= thresholds["p80"].get("fast_motion_score_proxy", np.inf) and mean_speed >= thresholds["p70"].get("pelvis_mean_speed", 0) and max(vertical, fb, lat) <= thresholds["p85"].get("pelvis_total_position_range", np.inf):
-        out.append(_proposal(meta, "cowgirl_fast_shallow", "movement", "positive", _conf(fast, thresholds, "fast_motion_score_proxy", weak_names, "weak_v2_fast_motion_candidate"), "machine_rule_v1", "fast_shallow_proxy_v1", ["fast_motion_score_proxy", "pelvis_mean_speed"], v, warnings))
+        out.append(_proposal(meta, "cowgirl_fast_shallow", "movement", "positive", _gate_conf(_conf(fast, thresholds, "fast_motion_score_proxy", weak_names, "weak_v2_fast_motion_candidate"), body, phase, guard), "machine_rule_v1", "fast_shallow_proxy_v1", ["fast_motion_score_proxy", "pelvis_mean_speed"], v, warnings + guard.get("domain_guard_warnings", [])))
     if torso_forward >= thresholds["p90"].get("torso_lean_forward_proxy", np.inf):
         out.append(_proposal(meta, "cowgirl_lean_forward", "movement", "uncertain", min(0.72, _conf(torso_forward, thresholds, "torso_lean_forward_proxy", weak_names, None)), "machine_rule_v1", "torso_lean_forward_uncertain_axis_v1", ["torso_lean_forward_proxy"], v, warnings + ["axis interpretation uncertain; proposal kept uncertain"]))
     if torso_back >= thresholds["p90"].get("torso_lean_back_proxy", np.inf):
@@ -210,6 +225,18 @@ def _conf(value: float, thresholds: dict[str, dict[str, float]], key: str, weak:
 def _mean_conf(values: list[float]) -> float:
     vals = [v for v in values if np.isfinite(v)]
     return float(np.mean(vals)) if vals else 0.0
+
+
+def _gate_conf(confidence: float, body: dict[str, Any], phase: dict[str, Any], guard: dict[str, Any]) -> float:
+    out = float(confidence) * float(guard.get("cowgirl_confidence_multiplier") or 1.0)
+    if body.get("body_motion_quality") not in {"good_body_motion", "partial_body_motion"}:
+        out *= 0.55
+    if phase.get("motion_phase_candidate") == "transition_adjustment_candidate":
+        out = min(out, 0.68)
+    moving_parts = int(body.get("moving_bodypart_count") or 0)
+    if moving_parts < 2:
+        out = min(out, 0.62)
+    return max(0.0, min(0.95, out))
 
 
 def _f(values: dict[str, Any], key: str) -> float:

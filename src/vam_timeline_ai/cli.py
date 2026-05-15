@@ -65,6 +65,9 @@ def build_parser() -> argparse.ArgumentParser:
     semantic_review.add_argument("--out-dir", required=True)
     semantic_review.add_argument("--count", type=int, default=10)
     semantic_review.add_argument("--attempt-timeline-export", default="true")
+    semantic_review.add_argument("--use-body-motion-quality", default="false")
+    semantic_review.add_argument("--prefer-clean-body-motion", default="false")
+    semantic_review.add_argument("--use-handmade-reference-matches", default="false")
 
     semantic_summary = subparsers.add_parser("summarize-semantic-review-010", help="Summarize user answers for the 10-item semantic review.")
     semantic_summary.add_argument("--answers", required=True)
@@ -122,6 +125,14 @@ def build_parser() -> argparse.ArgumentParser:
     audit_baked.add_argument("--out-jsonl", required=True)
     audit_baked.add_argument("--report", required=True)
 
+    body_quality = subparsers.add_parser("audit-body-motion-quality", help="Audit body-controller vs root/whole-person motion quality.")
+    body_quality.add_argument("--run-dir", required=True)
+    body_quality.add_argument("--sample-index", required=True)
+    body_quality.add_argument("--features", required=True)
+    body_quality.add_argument("--controller-map", required=True)
+    body_quality.add_argument("--out-jsonl", required=True)
+    body_quality.add_argument("--report", required=True)
+
     cmap = subparsers.add_parser("discover-controller-map", help="Discover controller names and conservative body-part mapping.")
     cmap.add_argument("--sample-index", required=True)
     cmap.add_argument("--out", required=True)
@@ -135,6 +146,30 @@ def build_parser() -> argparse.ArgumentParser:
     fv1.add_argument("--out-jsonl", required=True)
     fv1.add_argument("--out-npz", required=True)
     fv1.add_argument("--report", required=True)
+
+    handmade_import = subparsers.add_parser("import-handmade-reference-animations", help="Import handmade labeled reference Timeline animations.")
+    handmade_import.add_argument("--zip", required=True)
+    handmade_import.add_argument("--out-dir", required=True)
+
+    handmade_features = subparsers.add_parser("extract-handmade-reference-features", help="Extract features from handmade reference animations.")
+    handmade_features.add_argument("--manifest", required=True)
+    handmade_features.add_argument("--sample-index", required=True)
+    handmade_features.add_argument("--out-jsonl", required=True)
+    handmade_features.add_argument("--out-npz", required=True)
+    handmade_features.add_argument("--report", required=True)
+
+    handmade_sigs = subparsers.add_parser("build-handmade-reference-signatures", help="Build handmade reference family signatures.")
+    handmade_sigs.add_argument("--features", required=True)
+    handmade_sigs.add_argument("--out-json", required=True)
+    handmade_sigs.add_argument("--report", required=True)
+
+    handmade_match = subparsers.add_parser("compare-wild-to-handmade-references", help="Compare wild windows to handmade reference signatures.")
+    handmade_match.add_argument("--wild-features", required=True)
+    handmade_match.add_argument("--wild-body-quality", required=True)
+    handmade_match.add_argument("--handmade-features", required=True)
+    handmade_match.add_argument("--signatures", required=True)
+    handmade_match.add_argument("--out-jsonl", required=True)
+    handmade_match.add_argument("--report", required=True)
 
     pairs = subparsers.add_parser("build-context-pair-candidates", help="Build possible actor/context pair candidates without roles.")
     pairs.add_argument("--sample-index", required=True)
@@ -615,6 +650,19 @@ def cmd_audit_baked(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_audit_body_motion_quality(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.body_motion_quality import audit_body_motion_quality
+
+    rows = audit_body_motion_quality(args.run_dir, args.sample_index, args.features, args.controller_map, args.out_jsonl, args.report)
+    counts: dict[str, int] = {}
+    for row in rows:
+        key = str(row.get("body_motion_quality"))
+        counts[key] = counts.get(key, 0) + 1
+    print(f"Body motion quality audit written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}; counts: {counts}")
+    return 0
+
+
 def cmd_discover_controller_map(args: argparse.Namespace) -> int:
     from vam_timeline_ai.motion.controller_mapping import discover_controller_map
 
@@ -632,6 +680,42 @@ def cmd_extract_cowgirl_features_v1(args: argparse.Namespace) -> int:
     numeric = sum(1 for row in rows if row.get("feature_quality", {}).get("has_any_numeric_features"))
     print(f"Cowgirl v1 feature rows written: {args.out_jsonl}")
     print(f"Rows: {len(rows)}; numeric: {numeric}")
+    return 0
+
+
+def cmd_import_handmade_reference_animations(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.references.handmade_import import import_handmade_reference_animations
+
+    summary = import_handmade_reference_animations(args.zip, args.out_dir)
+    print(f"Handmade reference import written: {args.out_dir}")
+    print(f"Status: {summary.get('status')}; JSON: {summary.get('json_count')}; JPG: {summary.get('jpg_count')}")
+    return 0
+
+
+def cmd_extract_handmade_reference_features(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.references.handmade_features import extract_handmade_reference_features
+
+    rows = extract_handmade_reference_features(args.manifest, args.sample_index, args.out_jsonl, args.out_npz, args.report)
+    print(f"Handmade reference features written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}")
+    return 0
+
+
+def cmd_build_handmade_reference_signatures(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.references.signature_report import build_handmade_reference_signatures
+
+    sigs = build_handmade_reference_signatures(args.features, args.out_json, args.report)
+    print(f"Handmade signatures written: {args.out_json}")
+    print(f"Families: {len(sigs.get('families', {}))}")
+    return 0
+
+
+def cmd_compare_wild_to_handmade_references(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.references.reference_matcher import compare_wild_to_handmade_references
+
+    rows = compare_wild_to_handmade_references(args.wild_features, args.wild_body_quality, args.handmade_features, args.signatures, args.out_jsonl, args.report)
+    print(f"Wild/reference matches written: {args.out_jsonl}")
+    print(f"Rows: {len(rows)}")
     return 0
 
 
@@ -1110,6 +1194,9 @@ def cmd_export_semantic_review_010(args: argparse.Namespace) -> int:
         args.out_dir,
         count=args.count,
         attempt_timeline_export=_arg_bool(args.attempt_timeline_export),
+        use_body_motion_quality=_arg_bool(args.use_body_motion_quality),
+        prefer_clean_body_motion=_arg_bool(args.prefer_clean_body_motion),
+        use_handmade_reference_matches=_arg_bool(args.use_handmade_reference_matches),
     )
     print(f"Semantic review 010 written: {args.out_dir}")
     print(f"Review items: {summary['review_items']}; categories={summary['category_distribution']}")
@@ -1198,10 +1285,20 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_analyze_ml(args)
     if args.command == "audit-baked-samples":
         return cmd_audit_baked(args)
+    if args.command == "audit-body-motion-quality":
+        return cmd_audit_body_motion_quality(args)
     if args.command == "discover-controller-map":
         return cmd_discover_controller_map(args)
     if args.command == "extract-cowgirl-features-v1":
         return cmd_extract_cowgirl_features_v1(args)
+    if args.command == "import-handmade-reference-animations":
+        return cmd_import_handmade_reference_animations(args)
+    if args.command == "extract-handmade-reference-features":
+        return cmd_extract_handmade_reference_features(args)
+    if args.command == "build-handmade-reference-signatures":
+        return cmd_build_handmade_reference_signatures(args)
+    if args.command == "compare-wild-to-handmade-references":
+        return cmd_compare_wild_to_handmade_references(args)
     if args.command == "build-context-pair-candidates":
         return cmd_build_context_pairs(args)
     if args.command == "generate-weak-labels-v1":
