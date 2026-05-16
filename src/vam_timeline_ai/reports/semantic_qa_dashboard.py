@@ -15,9 +15,9 @@ def write_clean_v3_dashboard(run_dir: str | Path, out_md: str | Path, out_html: 
     manifest = _load_json_optional(run / "run_manifest.json")
     pose = load_jsonl(run / "pose_semantics" / "pose_semantics_v0.jsonl")
     interaction = load_jsonl(run / "interaction_semantics" / "interaction_semantics_v0.jsonl")
-    actions = _load_first(run / "semantic_actions" / "semantic_actions_v1.jsonl", run / "semantic_actions" / "semantic_actions_v0.jsonl")
-    semantic_db = _load_first(run / "datasets" / "semantic_candidate_db_v1.jsonl", run / "datasets" / "semantic_candidate_db_v0.jsonl")
-    cowgirl_db = _load_first(run / "datasets" / "cowgirl_candidate_db_v6.jsonl", run / "datasets" / "cowgirl_candidate_db_v5.jsonl")
+    actions = _load_first(run / "semantic_actions" / "semantic_actions_v2.jsonl", run / "semantic_actions" / "semantic_actions_v1.jsonl", run / "semantic_actions" / "semantic_actions_v0.jsonl")
+    semantic_db = _load_first(run / "datasets" / "semantic_candidate_db_v2.jsonl", run / "datasets" / "semantic_candidate_db_v1.jsonl", run / "datasets" / "semantic_candidate_db_v0.jsonl")
+    cowgirl_db = _load_first(run / "datasets" / "cowgirl_candidate_db_v7.jsonl", run / "datasets" / "cowgirl_candidate_db_v6.jsonl", run / "datasets" / "cowgirl_candidate_db_v5.jsonl")
     lines = _dashboard_lines(run, manifest, pose, interaction, actions, semantic_db, cowgirl_db)
     Path(out_md).parent.mkdir(parents=True, exist_ok=True)
     Path(out_md).write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -46,10 +46,19 @@ def _dashboard_lines(
     poses = Counter(r.get("pose_family") for r in pose)
     interactions = Counter(r.get("interaction_family") for r in interaction)
     phases = Counter(r.get("phase") for r in actions)
+    gates = Counter(r.get("clean_motion_gate") for r in actions)
     contacts = Counter(r.get("contact_support") for r in actions)
     top_scenes = Counter(r.get("source_scene_file") for r in semantic_db)
     questionable = Counter(r.get("source_scene_file") for r in cowgirl_db if not r.get("generation_safe") or r.get("category") != "cowgirl_clean_motion_generation_safe")
     warnings = sum(len(r.get("warnings") or []) for r in actions)
+    standing_leakage = sum(
+        1
+        for r in cowgirl_db
+        if r.get("category") == "cowgirl_clean_motion_generation_safe"
+        and (r.get("pose_family") == "standing" or r.get("semantic_family") in {"hand_gesture", "head_gesture"})
+    )
+    cowgirl_clean = cowcats.get("cowgirl_clean_motion_generation_safe", 0)
+    cowgirl_context = cowcats.get("cowgirl_pose_context_low_motion", 0) + cowcats.get("cowgirl_intro_alignment", 0) + cowcats.get("cowgirl_transition_setup", 0) + cowcats.get("cowgirl_no_clear_hip_motion", 0)
     lines = [
         "# clean_v3 Semantic QA Dashboard",
         "",
@@ -59,6 +68,8 @@ def _dashboard_lines(
         f"- Cowgirl DB records: {len(cowgirl_db)}",
         f"- Generation-safe semantic records: {sum(1 for r in semantic_db if r.get('generation_safe'))}",
         f"- Warning entries across semantic actions: {warnings}",
+        f"- Standing leakage into clean Cowgirl: {standing_leakage}",
+        f"- Cowgirl clean-motion vs context/setup: {cowgirl_clean} clean / {cowgirl_context} context",
         "",
         "## Pose Semantic Counts",
         "",
@@ -72,6 +83,8 @@ def _dashboard_lines(
     lines.extend(_counter_lines(cowcats))
     lines.extend(["", "## Phase Counts", ""])
     lines.extend(_counter_lines(phases))
+    lines.extend(["", "## Clean Motion Gate Counts", ""])
+    lines.extend(_counter_lines(gates))
     lines.extend(["", "## Contact/Support Counts", ""])
     lines.extend(_counter_lines(contacts))
     lines.extend(

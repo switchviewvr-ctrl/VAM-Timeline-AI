@@ -30,6 +30,12 @@ COMPACT_CANDIDATE_FIELDS = [
     "pose_subtype",
     "motion_subtype",
     "phase",
+    "clean_motion_gate",
+    "clean_motion_gate_reason",
+    "hip_motion_strength",
+    "pelvis_trajectory_strength",
+    "pelvis_cycle_count",
+    "motion_duration_confidence",
     "partner_relation",
     "contact_support",
     "generation_safe",
@@ -247,8 +253,8 @@ def _normalize_review_item(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _load_compact_candidates(run: Path) -> list[dict[str, Any]]:
-    cow = _load_first(run / "datasets" / "cowgirl_candidate_db_v6.jsonl", run / "datasets" / "cowgirl_candidate_db_v5.jsonl")
-    sem = _load_first(run / "datasets" / "semantic_candidate_db_v1.jsonl", run / "datasets" / "semantic_candidate_db_v0.jsonl")
+    cow = _load_first(run / "datasets" / "cowgirl_candidate_db_v7.jsonl", run / "datasets" / "cowgirl_candidate_db_v6.jsonl", run / "datasets" / "cowgirl_candidate_db_v5.jsonl")
+    sem = _load_first(run / "datasets" / "semantic_candidate_db_v2.jsonl", run / "datasets" / "semantic_candidate_db_v1.jsonl", run / "datasets" / "semantic_candidate_db_v0.jsonl")
     rows = cow or sem
     compact = []
     for row in rows:

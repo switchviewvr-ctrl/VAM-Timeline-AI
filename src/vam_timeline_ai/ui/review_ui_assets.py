@@ -311,9 +311,15 @@ function scoreBlock(item) {
   const keys = [
     "pose_confidence", "motion_score", "interaction_score", "hands_on_partner_chest_score",
     "hands_on_partner_hips_score", "partner_lying_score", "pelvis_alignment_score",
-    "rider_above_partner_score", "contact_support_confidence"
+    "rider_above_partner_score", "contact_support_confidence", "clean_motion_gate",
+    "hip_motion_strength", "pelvis_trajectory_strength", "pelvis_cycle_count",
+    "motion_duration_confidence"
   ];
-  return el("div", {class:"scores"}, keys.map(k => el("div", {}, [el("b", {text:k + ": "}), fmtNum(item[k] ?? (item.evidence_scores || {})[k])])));
+  return el("div", {class:"scores"}, keys.map(k => {
+    const raw = item[k] ?? (item.evidence_scores || {})[k];
+    const shown = k === "clean_motion_gate" ? value(raw) : fmtNum(raw);
+    return el("div", {}, [el("b", {text:k + ": "}), shown]);
+  }));
 }
 
 function renderReviewBatch() {
@@ -342,6 +348,7 @@ function reviewCard(item) {
     kv("Time", `${value(item.start_seconds)} - ${value(item.end_seconds)}s`),
     kv("Pose", `${value(item.pose_family || item.pose_semantics?.family)} / ${value(item.pose_subtype || item.pose_semantics?.subtype)}`),
     kv("Motion", `${value(item.motion_subtype || item.motion_semantics?.subtype)} / ${value(item.phase || item.motion_semantics?.phase)}`),
+    kv("Clean gate", `${value(item.clean_motion_gate)} / ${value(item.clean_motion_gate_reason)}`),
     kv("Partner", item.partner_relation),
     kv("Contact", item.contact_support),
     kv("Interaction", item.interaction_family),

@@ -746,6 +746,11 @@ def build_parser() -> argparse.ArgumentParser:
     calibration.add_argument("--previous-review", required=True)
     calibration.add_argument("--out-review", required=True)
 
+    calibration_v16 = subparsers.add_parser("run-clean-v3-v16-calibration", help="Ingest v16 findings, rebuild clean-motion gated DBs, and export v17 review.")
+    calibration_v16.add_argument("--run-dir", required=True)
+    calibration_v16.add_argument("--previous-review", required=True)
+    calibration_v16.add_argument("--out-review", required=True)
+
     ledger = subparsers.add_parser("build-human-review-ledger", help="Build audit-only human review memory ledger.")
     ledger.add_argument("--run-dir", required=True)
     ledger.add_argument("--include-runs", required=True)
@@ -2333,6 +2338,17 @@ def cmd_run_clean_v3_calibration_v1(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_run_clean_v3_v16_calibration(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.clean_v3_v16_calibration import run_clean_v3_v16_calibration
+
+    summary = run_clean_v3_v16_calibration(args.run_dir, args.previous_review, args.out_review)
+    print(f"clean_v3 v16 calibration complete: {args.run_dir}")
+    print(f"v17 review: {args.out_review}; items={summary['v17_review']['review_items']}")
+    print(f"Clean motion gate counts: {summary['rebuild']['clean_motion_gate_counts']}")
+    print(f"Cowgirl DB v7 categories: {summary['rebuild']['cowgirl_db_counts']}")
+    return 0
+
+
 def cmd_build_human_review_ledger(args: argparse.Namespace) -> int:
     from vam_timeline_ai.audits.human_review_memory import build_human_review_ledger
 
@@ -3288,6 +3304,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_export_semantic_review_v16(args)
     if args.command == "run-clean-v3-calibration-v1":
         return cmd_run_clean_v3_calibration_v1(args)
+    if args.command == "run-clean-v3-v16-calibration":
+        return cmd_run_clean_v3_v16_calibration(args)
     if args.command == "build-human-review-ledger":
         return cmd_build_human_review_ledger(args)
     if args.command == "build-error-taxonomy-report":
