@@ -884,6 +884,69 @@ References:
 - [Prompt To Interaction Plan](references/PROMPT_TO_INTERACTION_PLAN.md)
 - [clean_v3 Semantic Rescan](references/CLEAN_V3_SEMANTIC_RESCAN.md)
 
+## clean_v3 QA And Review Workflow
+
+clean_v3 is stricter and interaction-aware, but its candidate DBs are still
+audit inventories rather than ground truth. Human review findings are collected
+in an audit-only ledger so calibration can target recurring errors such as
+low-motion Cowgirl pose context, BJ/oral mistaken as Cowgirl, ambiguous contact
+support, duplicate review selection, and foot-anchor weirdness.
+
+The overnight QA workflow writes a dashboard, DB invariant report, clean_v2 to
+clean_v3 drift report, larger review batch plan, prompt capability matrix, and
+operator status report. It does not train ML, generate new Timeline animations,
+or modify `manual_labels.yaml`.
+
+Run:
+
+```powershell
+python -m vam_timeline_ai.cli run-clean-v3-overnight-qa ^
+  --run-dir data\runs\clean_v3 ^
+  --include-runs data\runs\clean_v2,data\runs\clean_v3
+```
+
+Review v16 should be checked before exporting any larger batch. Use the ledger
+and invariant report to decide the next calibration target, not as final labels.
+
+References:
+
+- [clean_v3 Status And QA](references/CLEAN_V3_STATUS_AND_QA.md)
+- [Human Review Memory](references/HUMAN_REVIEW_MEMORY.md)
+- [Semantic DB Invariants](references/SEMANTIC_DB_INVARIANTS.md)
+- [Review Batch Planning](references/REVIEW_BATCH_PLANNING.md)
+
+## Local Review UI
+
+The local Semantic Review Workbench helps validate clean_v3 review batches,
+candidate DB categories, hypotheses, error trends, and evidence scores without
+internet access or heavy dependencies. It is audit-only and does not modify
+`manual_labels.yaml`.
+
+Build the static fallback:
+
+```powershell
+python -m vam_timeline_ai.cli build-static-review-ui ^
+  --run-dir data\runs\clean_v3 ^
+  --review-dir data\runs\clean_v3\audits\semantic_review_010_v16 ^
+  --out-dir data\runs\clean_v3\audits\semantic_review_010_v16\review_ui_static
+```
+
+Open `review_ui_static\index.html`, review the cards, then export answers from
+the Export Answers tab. To append UI answers into the audit ledger:
+
+```powershell
+python -m vam_timeline_ai.cli ingest-review-ui-answers ^
+  --answers data\runs\clean_v3\audits\semantic_review_010_v16\human_review_ui_answers.jsonl ^
+  --review-dir data\runs\clean_v3\audits\semantic_review_010_v16 ^
+  --out-ledger data\runs\clean_v3\audits\human_review_ledger.jsonl ^
+  --report data\runs\clean_v3\audits\review_ui_answer_ingestion_report.md
+```
+
+References:
+
+- [Local Review UI](references/LOCAL_REVIEW_UI.md)
+- [Review Answer Ingestion](references/REVIEW_ANSWER_INGESTION.md)
+
 ## First Generated Motion Review
 
 The first generated motion review layer retargets synthesized relative motion onto a synthetic neutral controller baseline. Retargeting applies generated deltas to the baseline pose, keeps foot/knee anchors stable, validates distances and jumps, and renders technical previews.

@@ -97,6 +97,30 @@ def build_parser() -> argparse.ArgumentParser:
     semantic_summary.add_argument("--review", required=True)
     semantic_summary.add_argument("--out", required=True)
 
+    vam_review_package = subparsers.add_parser("build-vam-review-package", help="Build a practical VaM scene/time review package for a semantic review JSONL.")
+    vam_review_package.add_argument("--review", required=True)
+    vam_review_package.add_argument("--run-dir", required=True)
+    vam_review_package.add_argument("--source-run", required=True)
+    vam_review_package.add_argument("--out-dir", required=True)
+    vam_review_package.add_argument("--attempt-timeline-segments", default="true")
+
+    launch_review_ui = subparsers.add_parser("launch-review-ui", help="Launch local semantic review UI using only stdlib HTTP serving.")
+    launch_review_ui.add_argument("--run-dir", required=True)
+    launch_review_ui.add_argument("--review-dir", required=True)
+    launch_review_ui.add_argument("--host", default="127.0.0.1")
+    launch_review_ui.add_argument("--port", type=int, default=8765)
+
+    static_review_ui = subparsers.add_parser("build-static-review-ui", help="Build static semantic review UI files for a review folder.")
+    static_review_ui.add_argument("--run-dir", required=True)
+    static_review_ui.add_argument("--review-dir", required=True)
+    static_review_ui.add_argument("--out-dir", required=True)
+
+    ingest_review_ui = subparsers.add_parser("ingest-review-ui-answers", help="Ingest audit-only answers exported from the local review UI.")
+    ingest_review_ui.add_argument("--answers", required=True)
+    ingest_review_ui.add_argument("--review-dir", required=True)
+    ingest_review_ui.add_argument("--out-ledger", required=True)
+    ingest_review_ui.add_argument("--report", required=True)
+
     clean = subparsers.add_parser("prepare-clean-run", help="Create clean run folders and a run manifest.")
     clean.add_argument("--data-root", required=True)
     clean.add_argument("--run-name", required=True)
@@ -702,6 +726,76 @@ def build_parser() -> argparse.ArgumentParser:
     semantic_rescan = subparsers.add_parser("run-semantic-rescan-v1", help="Run clean_v3 semantic rescan: pose + motion + partner interaction + contact.")
     semantic_rescan.add_argument("--source-run", required=True)
     semantic_rescan.add_argument("--out-run", required=True)
+
+    ingest_v15 = subparsers.add_parser("ingest-v15-human-findings", help="Store semantic_review_010_v15 human audit findings without touching manual labels.")
+    ingest_v15.add_argument("--review-dir", required=True)
+
+    rebuild_v3_calibration = subparsers.add_parser("rebuild-clean-v3-semantic-actions-v1", help="Rebuild clean_v3 semantic actions and DBs with v15 calibration rules.")
+    rebuild_v3_calibration.add_argument("--run-dir", required=True)
+    rebuild_v3_calibration.add_argument("--previous-review", default=None)
+
+    export_v16 = subparsers.add_parser("export-semantic-review-v16", help="Export calibrated clean_v3 semantic review v16 and optional VaM package.")
+    export_v16.add_argument("--run-dir", required=True)
+    export_v16.add_argument("--out-dir", required=True)
+    export_v16.add_argument("--count", type=int, default=10)
+    export_v16.add_argument("--build-vam-package", default="true")
+    export_v16.add_argument("--previous-review", default=None)
+
+    calibration = subparsers.add_parser("run-clean-v3-calibration-v1", help="Ingest v15 findings, rebuild calibrated DBs, and export v16 review.")
+    calibration.add_argument("--run-dir", required=True)
+    calibration.add_argument("--previous-review", required=True)
+    calibration.add_argument("--out-review", required=True)
+
+    ledger = subparsers.add_parser("build-human-review-ledger", help="Build audit-only human review memory ledger.")
+    ledger.add_argument("--run-dir", required=True)
+    ledger.add_argument("--include-runs", required=True)
+    ledger.add_argument("--out-jsonl", required=True)
+    ledger.add_argument("--out-csv", required=True)
+    ledger.add_argument("--report", required=True)
+
+    taxonomy = subparsers.add_parser("build-error-taxonomy-report", help="Build error taxonomy report from human review ledger.")
+    taxonomy.add_argument("--human-review-ledger", required=True)
+    taxonomy.add_argument("--out", required=True)
+
+    db_validate = subparsers.add_parser("validate-semantic-dbs", help="Validate semantic and Cowgirl DB invariants.")
+    db_validate.add_argument("--run-dir", required=True)
+    db_validate.add_argument("--semantic-db", required=True)
+    db_validate.add_argument("--cowgirl-db", required=True)
+    db_validate.add_argument("--out", required=True)
+
+    dashboard = subparsers.add_parser("write-clean-v3-dashboard", help="Write clean_v3 semantic QA dashboard.")
+    dashboard.add_argument("--run-dir", required=True)
+    dashboard.add_argument("--out-md", required=True)
+    dashboard.add_argument("--out-html", required=True)
+
+    drift = subparsers.add_parser("compare-clean-v2-clean-v3", help="Write clean_v2 to clean_v3 semantic drift report.")
+    drift.add_argument("--clean-v2", required=True)
+    drift.add_argument("--clean-v3", required=True)
+    drift.add_argument("--out", required=True)
+
+    review_plan = subparsers.add_parser("plan-larger-review-batch-v1", help="Plan a larger review batch without exporting it.")
+    review_plan.add_argument("--run-dir", required=True)
+    review_plan.add_argument("--semantic-db", required=True)
+    review_plan.add_argument("--cowgirl-db", required=True)
+    review_plan.add_argument("--out", required=True)
+
+    prompt_matrix = subparsers.add_parser("write-prompt-capability-matrix", help="Write honest prompt capability matrix.")
+    prompt_matrix.add_argument("--run-dir", required=True)
+    prompt_matrix.add_argument("--out", required=True)
+
+    status = subparsers.add_parser("clean-v3-status", help="Print and write clean_v3 operator status.")
+    status.add_argument("--run-dir", required=True)
+
+    overnight = subparsers.add_parser("run-clean-v3-overnight-qa", help="Run resilient clean_v3 overnight QA reports.")
+    overnight.add_argument("--run-dir", required=True)
+    overnight.add_argument("--include-runs", required=True)
+
+    lineage = subparsers.add_parser("write-candidate-lineage-report", help="Write clean_v3 candidate lineage report.")
+    lineage.add_argument("--run-dir", required=True)
+    lineage.add_argument("--out", required=True)
+
+    reproducibility = subparsers.add_parser("run-clean-v3-reproducibility-audit", help="Write schema, manifest, lineage, reproducibility, and operator reports.")
+    reproducibility.add_argument("--run-dir", required=True)
 
     cmap = subparsers.add_parser("discover-controller-map", help="Discover controller names and conservative body-part mapping.")
     cmap.add_argument("--sample-index", required=True)
@@ -2195,6 +2289,170 @@ def cmd_run_semantic_rescan_v1(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ingest_v15_human_findings(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.clean_v3_calibration_v1 import ingest_v15_human_findings
+
+    summary = ingest_v15_human_findings(args.review_dir)
+    print(f"v15 human findings stored: {args.review_dir}")
+    print(f"Review items: {summary['review_items']}")
+    return 0
+
+
+def cmd_rebuild_clean_v3_semantic_actions_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.clean_v3_calibration_v1 import rebuild_clean_v3_semantic_actions_v1
+
+    summary = rebuild_clean_v3_semantic_actions_v1(args.run_dir, args.previous_review)
+    print(f"clean_v3 semantic actions v1 rebuilt: {args.run_dir}")
+    print(f"Semantic actions: {summary['semantic_actions']}")
+    print(f"Cowgirl DB v6 categories: {summary['cowgirl_db_counts']}")
+    return 0
+
+
+def cmd_export_semantic_review_v16(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.clean_v3_calibration_v1 import export_semantic_review_v16
+
+    summary = export_semantic_review_v16(
+        args.run_dir,
+        args.out_dir,
+        count=args.count,
+        build_vam_package=_arg_bool(args.build_vam_package),
+        previous_review=args.previous_review,
+    )
+    print(f"Semantic review v16 written: {args.out_dir}")
+    print(f"Review items: {summary['review_items']}; categories={summary['category_counts']}")
+    return 0
+
+
+def cmd_run_clean_v3_calibration_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.clean_v3_calibration_v1 import run_clean_v3_calibration_v1
+
+    summary = run_clean_v3_calibration_v1(args.run_dir, args.previous_review, args.out_review)
+    print(f"clean_v3 calibration v1 complete: {args.run_dir}")
+    print(f"v16 review: {args.out_review}; items={summary['v16_review']['review_items']}")
+    print(f"Cowgirl DB v6 categories: {summary['rebuild']['cowgirl_db_counts']}")
+    return 0
+
+
+def cmd_build_human_review_ledger(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.human_review_memory import build_human_review_ledger
+
+    summary = build_human_review_ledger(args.run_dir, args.include_runs, args.out_jsonl, args.out_csv, args.report)
+    print(f"Human review ledger written: {args.out_jsonl}")
+    print(f"Records: {summary['records']}; known verdicts={summary['known_human_verdicts']}")
+    return 0
+
+
+def cmd_build_error_taxonomy_report(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.error_taxonomy import build_error_taxonomy_report
+
+    summary = build_error_taxonomy_report(args.human_review_ledger, args.out)
+    print(f"Error taxonomy report written: {args.out}")
+    print(f"Top items: {summary['top_items']}")
+    return 0
+
+
+def cmd_validate_semantic_dbs(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.datasets.db_invariant_validator import validate_semantic_dbs
+
+    summary = validate_semantic_dbs(args.run_dir, args.semantic_db, args.cowgirl_db, args.out)
+    print(f"Semantic DB invariant report written: {args.out}")
+    print(f"Errors={summary['errors']}; warnings={summary['warnings']}")
+    return 0
+
+
+def cmd_write_clean_v3_dashboard(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.reports.semantic_qa_dashboard import write_clean_v3_dashboard
+
+    summary = write_clean_v3_dashboard(args.run_dir, args.out_md, args.out_html)
+    print(f"clean_v3 dashboard written: {args.out_md}")
+    print(f"Semantic records={summary['semantic_records']}; Cowgirl records={summary['cowgirl_records']}")
+    return 0
+
+
+def cmd_compare_clean_v2_clean_v3(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.reports.run_drift_report import compare_clean_v2_clean_v3
+
+    summary = compare_clean_v2_clean_v3(args.clean_v2, args.clean_v3, args.out)
+    print(f"Drift report written: {args.out}")
+    print(f"v2 Cowgirl={summary['v2_cowgirl_records']}; v3 Cowgirl={summary['v3_cowgirl_records']}")
+    return 0
+
+
+def cmd_plan_larger_review_batch_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.review_batch_planner import plan_larger_review_batch_v1
+
+    summary = plan_larger_review_batch_v1(args.run_dir, args.semantic_db, args.cowgirl_db, args.out)
+    print(f"Larger review batch plan written: {args.out}")
+    print(f"Planned={summary['planned_total']} / target={summary['target_total']}")
+    return 0
+
+
+def cmd_write_prompt_capability_matrix(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.reports.prompt_capability_matrix import write_prompt_capability_matrix
+
+    write_prompt_capability_matrix(args.run_dir, args.out)
+    print(f"Prompt capability matrix written: {args.out}")
+    return 0
+
+
+def cmd_clean_v3_status(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.reports.clean_v3_status import clean_v3_status
+
+    summary = clean_v3_status(args.run_dir)
+    print(f"clean_v3 status written: {summary['out']}")
+    print(f"Run exists={summary['run_exists']}; blockers={len(summary['blockers'])}")
+    return 0
+
+
+def cmd_run_clean_v3_overnight_qa(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.reports.clean_v3_overnight_qa import run_clean_v3_overnight_qa
+
+    summary = run_clean_v3_overnight_qa(args.run_dir, args.include_runs)
+    print(f"clean_v3 overnight QA summary written: {summary['summary']}")
+    return 0
+
+
+def cmd_write_candidate_lineage_report(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.reports.candidate_lineage import write_candidate_lineage_report
+
+    summary = write_candidate_lineage_report(args.run_dir, args.out)
+    print(f"Candidate lineage report written: {summary['out']}")
+    return 0
+
+
+def cmd_run_clean_v3_reproducibility_audit(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.reports.reproducibility_audit import run_clean_v3_reproducibility_audit
+
+    summary = run_clean_v3_reproducibility_audit(args.run_dir)
+    print(f"clean_v3 reproducibility audit summary written: {summary['summary']}")
+    return 0
+
+
+def cmd_launch_review_ui(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.ui.review_ui import launch_review_ui
+
+    launch_review_ui(args.run_dir, args.review_dir, args.host, args.port)
+    return 0
+
+
+def cmd_build_static_review_ui(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.ui.review_ui import build_static_review_ui
+
+    summary = build_static_review_ui(args.run_dir, args.review_dir, args.out_dir)
+    print(f"Static review UI written: {summary['index']}")
+    print(f"Review items: {summary['review_items']}; candidate rows: {summary['candidate_rows']}")
+    return 0
+
+
+def cmd_ingest_review_ui_answers(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.review_answer_ingestion import ingest_review_ui_answers
+
+    summary = ingest_review_ui_answers(args.answers, args.review_dir, args.out_ledger, args.report)
+    print(f"Review UI answers ingested: {summary['answers']} answer(s), {summary['new_ledger_records']} new ledger record(s)")
+    print(f"Report written: {summary['report']}")
+    return 0
+
+
 def cmd_discover_controller_map(args: argparse.Namespace) -> int:
     from vam_timeline_ai.motion.controller_mapping import discover_controller_map
 
@@ -2792,6 +3050,26 @@ def cmd_summarize_semantic_review_010(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_build_vam_review_package(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.vam_review_package import build_vam_review_package
+
+    summary = build_vam_review_package(
+        args.review,
+        args.run_dir,
+        args.source_run,
+        args.out_dir,
+        attempt_timeline_segments=_arg_bool(args.attempt_timeline_segments),
+    )
+    print(f"VaM review package written: {args.out_dir}")
+    print(
+        "Items: "
+        f"{summary['review_items']}; scenes={summary['scene_count']}; "
+        f"Timeline segments={summary['timeline_segments_successful']} successful / "
+        f"{summary['timeline_segments_attempted']} attempted"
+    )
+    return 0
+
+
 def _arg_bool(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
@@ -2846,6 +3124,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_export_semantic_review_010(args)
     if args.command == "summarize-semantic-review-010":
         return cmd_summarize_semantic_review_010(args)
+    if args.command == "build-vam-review-package":
+        return cmd_build_vam_review_package(args)
     if args.command == "prepare-clean-run":
         return cmd_prepare_clean_run(args)
     if args.command == "build-motion-source-index":
@@ -3000,6 +3280,42 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_validate_partner_relative_flow_v0(args)
     if args.command == "run-semantic-rescan-v1":
         return cmd_run_semantic_rescan_v1(args)
+    if args.command == "ingest-v15-human-findings":
+        return cmd_ingest_v15_human_findings(args)
+    if args.command == "rebuild-clean-v3-semantic-actions-v1":
+        return cmd_rebuild_clean_v3_semantic_actions_v1(args)
+    if args.command == "export-semantic-review-v16":
+        return cmd_export_semantic_review_v16(args)
+    if args.command == "run-clean-v3-calibration-v1":
+        return cmd_run_clean_v3_calibration_v1(args)
+    if args.command == "build-human-review-ledger":
+        return cmd_build_human_review_ledger(args)
+    if args.command == "build-error-taxonomy-report":
+        return cmd_build_error_taxonomy_report(args)
+    if args.command == "validate-semantic-dbs":
+        return cmd_validate_semantic_dbs(args)
+    if args.command == "write-clean-v3-dashboard":
+        return cmd_write_clean_v3_dashboard(args)
+    if args.command == "compare-clean-v2-clean-v3":
+        return cmd_compare_clean_v2_clean_v3(args)
+    if args.command == "plan-larger-review-batch-v1":
+        return cmd_plan_larger_review_batch_v1(args)
+    if args.command == "write-prompt-capability-matrix":
+        return cmd_write_prompt_capability_matrix(args)
+    if args.command == "clean-v3-status":
+        return cmd_clean_v3_status(args)
+    if args.command == "run-clean-v3-overnight-qa":
+        return cmd_run_clean_v3_overnight_qa(args)
+    if args.command == "write-candidate-lineage-report":
+        return cmd_write_candidate_lineage_report(args)
+    if args.command == "run-clean-v3-reproducibility-audit":
+        return cmd_run_clean_v3_reproducibility_audit(args)
+    if args.command == "launch-review-ui":
+        return cmd_launch_review_ui(args)
+    if args.command == "build-static-review-ui":
+        return cmd_build_static_review_ui(args)
+    if args.command == "ingest-review-ui-answers":
+        return cmd_ingest_review_ui_answers(args)
     if args.command == "discover-controller-map":
         return cmd_discover_controller_map(args)
     if args.command == "extract-cowgirl-features-v1":
