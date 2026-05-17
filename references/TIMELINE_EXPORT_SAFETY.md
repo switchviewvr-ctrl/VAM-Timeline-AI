@@ -24,3 +24,18 @@ Export metadata records:
 If no allowed bodypart controllers remain, no fake segment is created. The item must be inspected in the original scene instead.
 
 Full VaM poses should not be blindly loaded as animation data. Pose-like data may contain world-space source placement and must be stripped down to safe relative body-controller deltas before it can be considered for animation output.
+
+## Accepted Manual GT V4 Rules
+
+`data/runs/clean_v3/generation/manual_gt_timeline_examples_v4` is the accepted review-only baseline reference.
+
+Future Timeline exports should preserve these rules:
+
+- Include Position and Rotation quaternion tracks for every exported controller.
+- Require `hipControl` when the source capture has it.
+- For Cowgirl/Reverse Cowgirl, use `hipControl` as the primary visible driver.
+- Do not use `pelvisControl` as the sole Cowgirl driver.
+- Keep static anchors constant in position and rotation.
+- Use sparse semantic keyframes by default, with 1 FPS as the accepted manual-GT review default.
+- Use `data/config/manual_gt_motion_amplitude_profiles_v1.yaml` as the default readability profile set.
+- Do not iterate on v4 unless a specific VaM test problem is reported.

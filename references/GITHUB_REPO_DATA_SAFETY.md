@@ -63,6 +63,6 @@ The report should have no hard errors. Hard errors include tracked raw scenes, l
 
 ## GitHub Actions
 
-CI is intentionally lightweight. It installs the package with dev dependencies, compiles sources, and runs unit tests. It does not run the local data pipeline and does not require `G:\` data.
+CI is intentionally lightweight. It installs the package with dev dependencies, compiles sources, and runs unit tests. It does not run the local data pipeline and does not require private local VaM data.
 
 The current workflow uses `actions/checkout@v4` and `actions/setup-python@v5`. If GitHub reports Node.js action deprecation warnings, update the action versions after verifying the official supported versions.

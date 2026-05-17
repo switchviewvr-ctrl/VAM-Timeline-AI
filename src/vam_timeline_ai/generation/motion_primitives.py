@@ -45,6 +45,16 @@ class MotionPrimitive:
     warnings: list[str] = field(default_factory=list)
     is_timeline_clip: bool = False
     contains_absolute_world_coordinates: bool = False
+    required_pose_family: str = "unknown"
+    required_pose_subtype: str = "unknown"
+    compatible_pose_subtypes: list[str] = field(default_factory=list)
+    required_partner_relation: list[str] = field(default_factory=list)
+    compatible_partner_relations: list[str] = field(default_factory=list)
+    contact_support_requirements: dict[str, Any] = field(default_factory=dict)
+    anchor_profile: dict[str, Any] = field(default_factory=dict)
+    pose_context_requirements: dict[str, Any] = field(default_factory=dict)
+    interaction_frame: str = "body_relative"
+    torso_requirement: str = "unknown"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

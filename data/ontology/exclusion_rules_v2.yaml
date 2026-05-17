@@ -1,0 +1,64 @@
+schema_version: exclusion_rules_v2
+meaning_source: semantik_master_konsolidiert_docx
+exclusions:
+  cowgirl:
+    - name: inverted_driver_bj_oral
+      condition: head_primary_yz_driver AND pelvis_static
+      reason: Cowgirl is bottom-up; head-driven top-down motion breaks neck/spine hierarchy.
+      resolve_as: bj_oral
+    - name: quadruped_grounding_doggy
+      condition: chest_y_near_pelvis_y AND feet_behind_pelvis_z AND hands_front_support
+      reason: Support load moved to quadruped Z-axis state.
+      resolve_as: doggy
+    - name: full_extension_standing
+      condition: pelvis_height_gt_95pct_leg_length AND leg_chain_fully_extended
+      reason: Sitting/riding anchor is gone; feet slide or carry standing weight.
+      resolve_as: standing_hand_head
+    - name: hand_or_head_only_loop
+      condition: pelvis_static AND (hands_primary OR head_primary)
+      reason: Violates pelvis-driver hierarchy.
+      resolve_as: handjob_or_bj_oral_or_standing_hand_head
+  reverse_cowgirl:
+    - name: lean_back_is_not_reverse
+      condition: torso_lean_backward AND NOT back_to_partner
+      reason: Reverse requires facing-away/back-to-partner evidence.
+      resolve_as: cowgirl_lean_back_supported
+  doggy:
+    - name: upright_biped_shift
+      condition: chest_high_upright AND no_partner_behind
+      reason: Becomes Cowgirl/standing depending support.
+      resolve_as: cowgirl_or_standing
+    - name: supine_roll
+      condition: pelvis_chest_roll_near_180deg
+      reason: Quadruped ground constraints inverted.
+      resolve_as: missionary_or_unknown
+    - name: unanchored_bending
+      condition: knees_not_grounded AND feet_carry_full_weight
+      reason: Standing bending state, not doggy.
+      resolve_as: standing_hand_head
+  bj_oral:
+    - name: root_driven_loops
+      condition: pelvis_primary_cyclic_y_or_z
+      reason: Oral needs head/chest target vector with pelvis isolator.
+      resolve_as: cowgirl_or_doggy_or_unknown
+    - name: symmetrical_target_tracking
+      condition: head_at_eye_height AND reciprocal_face_to_face_z_motion
+      reason: Face-to-face/kissing state, not oral.
+      resolve_as: hand_touching_or_unknown
+    - name: ungrounded_torso_swing
+      condition: chest_large_xz_swing AND no_hand_or_leg_anchor
+      reason: Neck target loses stable base.
+      resolve_as: unknown
+  missionary:
+    - name: active_z_thrust_without_external_impact
+      condition: pelvis_active_z_driver AND no_external_partner_trigger
+      reason: Missionary receiver state should be reactive/counter-driven.
+      resolve_as: receiver_response_or_unknown
+    - name: anterior_pelvic_tilt_on_base
+      condition: pelvis_on_ground AND extreme_anterior_tilt
+      reason: Spine inversion through floor.
+      resolve_as: broken_pose
+    - name: independent_air_stepping
+      condition: feet_airborne AND walking_cycles
+      reason: Locomotion pattern without ground raycasts becomes invalid.
+      resolve_as: broken_pose

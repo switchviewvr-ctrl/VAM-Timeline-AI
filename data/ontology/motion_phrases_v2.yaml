@@ -1,0 +1,230 @@
+schema_version: motion_phrases_v2
+meaning_source: semantik_master_konsolidiert_docx
+phrases:
+  cowgirl:
+    family: cowgirl
+  cowgirl grinding:
+    family: cowgirl
+    motion_subtype: cowgirl_grinding
+  grindet:
+    family: cowgirl
+    motion_subtype: cowgirl_grinding
+  cowgirl riding:
+    family: cowgirl
+    motion_subtype: cowgirl_riding
+  riding:
+    motion_subtype: cowgirl_riding
+  reiten:
+    family: cowgirl
+    motion_subtype: cowgirl_riding
+  bounce:
+    motion_subtype: cowgirl_vertical_bounce
+  bouncing:
+    motion_subtype: cowgirl_vertical_bounce
+  wippt:
+    motion_subtype: cowgirl_vertical_bounce
+  auf und ab:
+    motion_subtype: cowgirl_vertical_bounce
+  body roll:
+    motion_subtype: cowgirl_sequential_spine_wave
+  wellenfoermig:
+    motion_subtype: cowgirl_sequential_spine_wave
+  corkscrew:
+    motion_subtype: cowgirl_corkscrew_grind
+  korkenzieher:
+    motion_subtype: cowgirl_corkscrew_grind
+  cowgirl leaning forward:
+    family: cowgirl
+    pose_subtype: cowgirl_lean_forward_supported
+    torso_lean: forward
+  leaning forward:
+    pose_modifier: lean_forward
+    torso_lean: forward
+  nach vorne gelehnt:
+    pose_modifier: lean_forward
+    torso_lean: forward
+  cowgirl leaning back:
+    family: cowgirl
+    pose_subtype: cowgirl_lean_back_supported
+    torso_lean: backward
+    facing_context: front_cowgirl
+    not_reverse: true
+  lean back cowgirl:
+    family: cowgirl
+    pose_subtype: cowgirl_lean_back_supported
+    torso_lean: backward
+    facing_context: front_cowgirl
+    not_reverse: true
+  cowgirl zurueckgelehnt:
+    family: cowgirl
+    pose_subtype: cowgirl_lean_back_supported
+    torso_lean: backward
+    facing_context: front_cowgirl
+    not_reverse: true
+  zurückgelehnt:
+    pose_subtype: cowgirl_lean_back_supported
+    torso_lean: backward
+    facing_context: front_cowgirl
+    not_reverse: true
+  zurueckgelehnt:
+    pose_subtype: cowgirl_lean_back_supported
+    torso_lean: backward
+    facing_context: front_cowgirl
+    not_reverse: true
+  nach hinten gelehnt:
+    pose_subtype: cowgirl_lean_back_supported
+    torso_lean: backward
+    facing_context: front_cowgirl
+    not_reverse: true
+  stuetzt sich hinten ab:
+    support_context: hands_behind_support
+    contact_support: hands_behind_support
+  stützt sich hinten ab:
+    support_context: hands_behind_support
+    contact_support: hands_behind_support
+  hands behind:
+    support_context: hands_behind_support
+    contact_support: hands_behind_support
+  hands on partner chest:
+    contact_support: hands_on_partner_chest
+  hands on chest:
+    contact_support: hands_on_partner_chest
+  haende auf brust:
+    contact_support: hands_on_partner_chest
+  hände auf brust:
+    contact_support: hands_on_partner_chest
+  hands on partner hips:
+    contact_support: hands_on_partner_hips
+  hands on hips:
+    contact_support: hands_on_partner_hips
+  haende auf huefte:
+    contact_support: hands_on_partner_hips
+  hände auf hüfte:
+    contact_support: hands_on_partner_hips
+  hands on thighs:
+    contact_support: hands_on_partner_legs_or_thighs
+  hands on partner legs:
+    contact_support: hands_on_partner_legs_or_thighs
+  hands on his legs:
+    contact_support: hands_on_partner_legs_or_thighs
+  hands on his thighs:
+    contact_support: hands_on_partner_legs_or_thighs
+  haende auf seinen beinen:
+    contact_support: hands_on_partner_legs_or_thighs
+  hände auf seinen beinen:
+    contact_support: hands_on_partner_legs_or_thighs
+  stützt sich an seinen beinen ab:
+    contact_support: hands_on_partner_legs_or_thighs
+  stuetzt sich an seinen beinen ab:
+    contact_support: hands_on_partner_legs_or_thighs
+  hände auf seinen oberschenkeln:
+    contact_support: hands_on_partner_legs_or_thighs
+  haende auf seinen oberschenkeln:
+    contact_support: hands_on_partner_legs_or_thighs
+  stuetzt sich an seinen oberschenkeln ab:
+    contact_support: hands_on_partner_legs_or_thighs
+  hände auf boden:
+    contact_support: hands_on_floor_or_bed
+  haende auf boden:
+    contact_support: hands_on_floor_or_bed
+  hands on floor:
+    contact_support: hands_on_floor_or_bed
+  hands free:
+    contact_support: hands_free
+  reverse cowgirl:
+    family: reverse_cowgirl
+    facing_context: back_to_partner
+  standing reverse cowgirl:
+    family: reverse_cowgirl
+    pose_subtype: reverse_cowgirl_standing_squat
+    facing_context: back_to_partner
+  rueckwaerts auf ihm:
+    family: reverse_cowgirl
+    facing_context: back_to_partner
+  rückwärts auf ihm:
+    family: reverse_cowgirl
+    facing_context: back_to_partner
+  mit dem ruecken zu ihm:
+    family: reverse_cowgirl
+    facing_context: back_to_partner
+  mit dem rücken zu ihm:
+    family: reverse_cowgirl
+    facing_context: back_to_partner
+  doggy:
+    family: doggy
+  doggy style:
+    family: doggy
+  all fours:
+    family: doggy
+    pose_subtype: doggy_all_fours
+  vierfuessler:
+    family: doggy
+    pose_subtype: doggy_all_fours
+  vierfüßler:
+    family: doggy
+    pose_subtype: doggy_all_fours
+  elevated doggy:
+    family: doggy
+    pose_subtype: doggy_elevated_support
+  upright doggy:
+    family: doggy
+    pose_subtype: doggy_vertical_kneeling
+  von hinten:
+    family: doggy
+    partner_relation: partner_behind
+  bj:
+    family: bj_oral
+  blowjob:
+    family: bj_oral
+  oral:
+    family: bj_oral
+  blasen:
+    family: bj_oral
+  head bob:
+    family: bj_oral
+    motion_subtype: bj_head_bob
+  kopfbewegung:
+    family: bj_oral
+    motion_subtype: bj_head_bob
+  deep throat:
+    family: bj_oral
+    motion_subtype: bj_deep_alignment
+    pose_subtype: bj_deep_alignment
+  handjob:
+    family: handjob
+  hj:
+    family: handjob
+  mit der hand:
+    family: handjob
+  missionary:
+    family: missionary
+  missionar:
+    family: missionary
+  legs up:
+    family: missionary
+    pose_subtype: missionary_legs_up
+  beine hoch:
+    family: missionary
+    pose_subtype: missionary_legs_up
+  slow:
+    tempo: slow
+  langsam:
+    tempo: slow
+  fast:
+    tempo: fast
+  schnell:
+    tempo: fast
+  gentle:
+    style: gentle
+  sanft:
+    style: gentle
+  rough:
+    style: rough
+  hart:
+    style: rough
+  intro:
+    family_modifier: transition_setup
+  transition:
+    family_modifier: transition_setup
+  hold:
+    family_modifier: pose_context_hold

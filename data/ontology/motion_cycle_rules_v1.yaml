@@ -1,0 +1,94 @@
+schema: motion_cycle_rules_v1
+purpose: >
+  Review-assist rules for cycle-aware semantic motion analysis. These rules do
+  not create ground truth labels, train ML, or generate Timeline animations.
+
+global:
+  clean_motion_requires:
+    - compatible_pose
+    - correct_semantic_driver
+    - repeated_cycle_or_soft_short_cycle
+    - stable_required_anchors
+    - preserved_pose_family
+    - valid_partner_alignment_when_available
+  cycle_gate:
+    pass_min_cycles: 1.0
+    soft_pass_min_cycles: 0.5
+    preferred_min_cycles: 1.5
+  rejected_states:
+    - monotonic_transition
+    - pose_hold
+    - reaching_acquisition
+    - crawling_locomotion
+    - wrong_driver
+    - anchor_lost
+    - pose_broken
+    - partner_alignment_lost
+
+cowgirl:
+  semantic_primary_driver: pelvis_hip
+  vam_primary_driver: hipControl
+  fallback_driver: pelvisControl
+  followers: [pelvisControl, abdomenControl, abdomen2Control, chestControl, headControl]
+  accepted_axes:
+    bounce: [y]
+    riding: [y, z]
+    grinding: [x, z]
+  required_pose: [cowgirl]
+  required_partner_relation_any: [rider_over_receiver, rider_above_partner, pelvis_aligned]
+  stable_anchors: [lFootControl, rFootControl]
+  mostly_stable_anchors: [lKneeControl, rKneeControl]
+  reject:
+    - monotonic_upward_hip_motion
+    - feet_unplanted
+    - legs_extend_into_standing
+    - partner_alignment_lost
+    - head_primary_driver
+    - hand_primary_driver
+    - no_hip_cycle
+
+doggy:
+  semantic_primary_driver: pelvis_hip
+  accepted_axis: z
+  required_pose_or_relation:
+    poses: [doggy_all_fours, doggy_bent_forward, doggy_elevated_support, standing_doggy]
+    relations: [partner_behind, behind_receiver]
+  stable_anchors: [lHandControl, rHandControl, lKneeControl, rKneeControl, lFootControl, rFootControl]
+  reject:
+    - crawling_locomotion
+    - alternating_hand_locomotion
+    - torso_upright_rider_relation
+    - monotonic_transition
+
+bj_oral:
+  semantic_primary_driver: head_neck
+  vam_primary_driver: headControl
+  mechanical_support_driver: chestControl
+  pelvis_role: static_or_low_motion
+  required_cycle: approach_withdraw
+  reject:
+    - one_way_head_lowering
+    - pelvis_hip_macro_cycle
+    - no_return_stroke
+    - standing_bend_without_target_lock
+
+handjob:
+  semantic_primary_driver: hands
+  vam_primary_drivers: [lHandControl, rHandControl]
+  pelvis_role: static_or_low_motion
+  chest_role: mostly_static
+  required_cycle: hand_forward_back_or_up_down_with_return_stroke
+  reject:
+    - one_way_reach_and_lock
+    - shoulder_chest_body_reach
+    - pelvis_hip_driver
+
+missionary:
+  semantic_primary_driver: pelvis_counter_driver
+  required_pose: [missionary, supine]
+  allowed_motion: [pelvis_counter_lift, impact_absorption]
+  chest_head_role: low_grounded_or_damped
+  reject:
+    - chest_lifts_into_sitting
+    - body_rolls_prone
+    - active_cowgirl_style_riding

@@ -1,0 +1,54 @@
+schema: rig_anatomy_roles_by_family_v1
+description: Semantic body-region roles by motion family.
+
+families:
+  cowgirl:
+    primary_driver_regions: [lower_body_core]
+    required_visible_driver_controllers: [hipControl]
+    optional_amplifier_regions: [thighs]
+    follower_regions: [pelvis, upper_body_core, head_neck]
+    anchor_regions: [feet, knees]
+    support_regions: [hands]
+    conflict_if_primary_driver: [head_neck, hands]
+    notes:
+      - pelvisControl may follow or remain static; it must not be the sole primary driver.
+      - Feet and knees should remain anchor-like unless a transition explicitly says otherwise.
+
+  reverse_cowgirl:
+    primary_driver_regions: [lower_body_core]
+    required_visible_driver_controllers: [hipControl]
+    optional_amplifier_regions: [thighs]
+    follower_regions: [pelvis, upper_body_core, head_neck]
+    anchor_regions: [feet, knees]
+    support_regions: [hands]
+    required_context: [back_to_partner, facing_away_from_partner]
+    conflict_if_primary_driver: [head_neck, hands]
+
+  bj_oral:
+    primary_driver_regions: [head_neck, upper_body_core]
+    secondary_driver_regions: [hands]
+    static_regions: [lower_body_core, pelvis, feet]
+    anchor_regions: [feet, knees]
+    conflict_if_primary_driver: [lower_body_core, pelvis]
+
+  handjob:
+    primary_driver_regions: [hands]
+    secondary_driver_regions: [arms]
+    static_regions: [lower_body_core, pelvis, feet]
+    conflict_if_primary_driver: [lower_body_core, head_neck]
+
+  doggy:
+    primary_or_response_regions: [lower_body_core, pelvis]
+    anchor_regions: [hands, knees, feet]
+    follower_regions: [upper_body_core, head_neck]
+    conflict_if: [standing_leg_extension, hand_locomotion, crawling_locomotion]
+
+  missionary:
+    reactive_driver_regions: [lower_body_core, pelvis, thighs, feet]
+    grounded_regions: [upper_body_core, head_neck]
+    conflict_if: [sitting_up, cowgirl_upright_state]
+
+  standing_hand_head:
+    primary_driver_regions: [hands, head_neck]
+    static_regions: [lower_body_core, pelvis]
+    conflict_with: [cowgirl_clean_motion]

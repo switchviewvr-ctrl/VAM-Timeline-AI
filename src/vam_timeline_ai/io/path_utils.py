@@ -4,13 +4,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import os
 
 
 DEFAULT_PROJECT_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_MOCAP_COMPILER = Path(r"G:\VAM\Research\MocapResearch\vam_mocap_dataset_compiler")
-DEFAULT_TIMELINE_REPO = Path(r"G:\VAM\Research\MocapResearch\vam-timeline-master")
-DEFAULT_RAW_MOCAP_RESEARCH = Path(r"G:\VAM\Research\MocapResearch")
-DEFAULT_VIRTUAL_COMPANION = Path(r"G:\Virtual Companion")
+
+
+def _env_path(name: str, fallback: Path) -> Path:
+    value = os.environ.get(name)
+    return Path(value) if value else fallback
+
+
+DEFAULT_MOCAP_COMPILER = _env_path("VAM_TIMELINE_AI_MOCAP_COMPILER", DEFAULT_PROJECT_ROOT / "references" / "external" / "vam_mocap_dataset_compiler")
+DEFAULT_TIMELINE_REPO = _env_path("VAM_TIMELINE_AI_TIMELINE_REPO", DEFAULT_PROJECT_ROOT / "references" / "external" / "vam-timeline")
+DEFAULT_RAW_MOCAP_RESEARCH = _env_path("VAM_TIMELINE_AI_RAW_SCENES", DEFAULT_PROJECT_ROOT / "data" / "raw" / "vam_scenes")
+DEFAULT_VIRTUAL_COMPANION = _env_path("VAM_TIMELINE_AI_VIRTUAL_COMPANION", DEFAULT_PROJECT_ROOT / "references" / "external" / "virtual_companion")
 
 
 @dataclass(frozen=True)

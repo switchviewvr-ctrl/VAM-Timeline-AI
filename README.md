@@ -10,6 +10,34 @@ text prompt -> semantic motion plan -> VaM Timeline animation
 
 The current phase is not ML training, motion matching, bridge playback, or loop extraction. The current phase is semantic motion understanding: building a database that can describe how an active actor moves over time so a later generative system can plan and assemble VaM Timeline animation.
 
+## Adding New VaM Scenes
+
+New source scenes must be imported as a separate delta run before they are considered for the main dataset. Do not drop them directly into `clean_v3` outputs.
+
+For a local new-scene batch:
+
+```powershell
+python -m vam_timeline_ai.cli run-new-scenes-delta-import ^
+  --raw-dir "<path-to-local-vam-scenes>" ^
+  --base-run data\runs\clean_v3 ^
+  --out-run data\runs\<your_delta_run_name>
+```
+
+The delta run scans only that folder, rebuilds technical/semantic artifacts under `data\runs\clean_v3_new_scenes`, compares the result against `clean_v3`, and exports a new-scene review package. Review those candidates manually before promoting anything into the main dataset. Candidate DB rows remain audit/candidate data, not human training truth.
+
+See [NEW_SCENES_DELTA_IMPORT.md](references/NEW_SCENES_DELTA_IMPORT.md).
+
+Before sharing run artifacts, neutralize local scene identifiers:
+
+```powershell
+python -m vam_timeline_ai.cli sanitize-run-scene-identifiers ^
+  --run-dir data\runs\<your_run> ^
+  --alias-map-out data\runs\<your_run>\local_scene_aliases.private.json ^
+  --report data\runs\<your_run>\reports\scene_identifier_sanitization.md
+```
+
+The alias map is local run data and is ignored by git. Public databases should keep only neutral aliases such as `scene_000001.json`.
+
 ## Direction
 
 The previous mocap compiler proved useful technical pieces:
@@ -21,6 +49,24 @@ The previous mocap compiler proved useful technical pieces:
 - offline Segment-to-Timeline export
 
 Those ideas remain valuable references, but the goal here is different. A generative animation system does not need only perfect loops. It needs to understand behavior: posture, rhythm, contact, attention, transitions, pauses, intensity changes, and how a movement develops over time.
+
+## Context + Semantics Before Prompt-To-Timeline
+
+The current accepted architecture adds a context layer before any future Prompt-to-Timeline work:
+
+- rig anatomy maps body language to VaM controllers, with Cowgirl `pelvis_hip` using `hipControl` as the visible primary driver
+- motion ontology and biomechanical gates separate clean cyclic motion from pose holds, transitions, reaching, crawling, and missing-controller artifacts
+- NLP lexicons map German/English prompt phrases into semantic tokens
+- component intent plans represent prompts as ordered semantic phases, not Timeline exports
+- external web context is candidate research only and must be reviewed before it changes ontology
+
+No command in this layer modifies `manual_labels.yaml`, trains ML, or generates Timeline animation. See:
+
+- [RIG_ANATOMY_ONTOLOGY.md](references/RIG_ANATOMY_ONTOLOGY.md)
+- [NLP_LEXICON_AND_EXTERNAL_DICTIONARIES.md](references/NLP_LEXICON_AND_EXTERNAL_DICTIONARIES.md)
+- [COMPONENT_BASED_MOTION_ONTOLOGY.md](references/COMPONENT_BASED_MOTION_ONTOLOGY.md)
+- [NLP_TO_MOTION_INTENT_PLAN.md](references/NLP_TO_MOTION_INTENT_PLAN.md)
+- [CONTEXT_AND_SEMANTICS_ROADMAP_TO_PROMPT.md](references/CONTEXT_AND_SEMANTICS_ROADMAP_TO_PROMPT.md)
 
 ## Loops Are A Special Case
 
@@ -253,6 +299,39 @@ See:
 - [WHY_RETRIEVAL_IS_NOT_FINAL_GENERATION.md](references/WHY_RETRIEVAL_IS_NOT_FINAL_GENERATION.md)
 - [TEXT_TO_TIMELINE_ROADMAP.md](references/TEXT_TO_TIMELINE_ROADMAP.md)
 
+### Cowgirl Motion Flow V1
+
+Motion Flow V0 proved that generated relative deltas can be played safely in VaM through a review-only player: the Person/root stays fixed, anchors can remain stable, and reset works. V0 was intentionally simple and looked like an isolated pelvis loop when tested from a standing baseline.
+
+Motion Flow V1 adds a Cowgirl-specific review baseline and a body coordination profile. It generates pelvis driver motion plus damped abdomen/chest/head followers, static knee/foot anchors, and optional hand support anchors. The oval grind profile reduces lateral-only hula-hoop motion by increasing forward/back and vertical components.
+
+This is still review-only. It is not final text-to-animation, not native Timeline export, not clip stitching, and not ML training. The review player applies generated relative deltas from the current captured VaM controller baseline.
+
+See:
+
+- [COWGIRL_MOTION_FLOW_V1.md](references/COWGIRL_MOTION_FLOW_V1.md)
+- [COWGIRL_REVIEW_BASELINE_POSE.md](references/COWGIRL_REVIEW_BASELINE_POSE.md)
+- [REVIEW_PLAYER_V1.md](references/REVIEW_PLAYER_V1.md)
+
+### Native Timeline Export
+
+The Generated Motion Review Player was a temporary debug tool. The main generated output path is native Timeline JSON:
+
+```text
+prompt -> semantic motion plan -> generated relative motion flow -> retarget/anchor safety -> native Timeline JSON
+```
+
+Native export v0 writes Timeline-like `SerializeVersion: 283` JSON with generated controller curves, not a custom review-player schema. It remains experimental until VaM Timeline import is manually confirmed. The exporter still rejects Person/root/world tracks, does not use source-world coordinates, and does not stitch clips.
+
+Native export v1 bakes generated relative motion onto a generated Cowgirl/kneeling baseline before writing Timeline keyframes. This matters because Timeline plays concrete controller targets; it does not add relative deltas to a captured baseline on its own.
+
+See:
+
+- [NATIVE_TIMELINE_EXPORT_RESEARCH.md](references/NATIVE_TIMELINE_EXPORT_RESEARCH.md)
+- [NATIVE_TIMELINE_EXPORT_FROM_GENERATED_FLOW.md](references/NATIVE_TIMELINE_EXPORT_FROM_GENERATED_FLOW.md)
+- [NATIVE_TIMELINE_EXPORT_V1_BASELINE_BAKING.md](references/NATIVE_TIMELINE_EXPORT_V1_BASELINE_BAKING.md)
+- [REVIEW_PLAYER_IS_DEBUG_ONLY.md](references/REVIEW_PLAYER_IS_DEBUG_ONLY.md)
+
 The first 10-item VaM semantic review showed that the machine/silver interpretation was not reliable enough for more ML. Only `review_010` was a clear Cowgirl segment. Several examples were transition/in-between motions, one looked head/BJ-domain rather than Cowgirl, and two were whole-controller/whole-person motion instead of real body/extremity animation.
 
 Those findings live under:
@@ -279,13 +358,19 @@ python -m vam_timeline_ai.cli audit-body-motion-quality ^
 
 Final generated VaM Timeline animation must never output Person/root/world transform motion. Only real bodypart controller tracks such as `hipControl`, `abdomenControl`, `chestControl`, `headControl`, hands, knees, feet, and thighs are valid animation targets.
 
+### Manual GT Timeline V4 Accepted Baseline
+
+`data/runs/clean_v3/generation/manual_gt_timeline_examples_v4` is the accepted review-only baseline reference for future generation guardrails. It uses real manual VaM pose captures, includes controller rotations, requires `hipControl`, uses sparse 1 FPS semantic keyframes, and applies `data/config/manual_gt_motion_amplitude_profiles_v1.yaml` for readable driver motion.
+
+For Cowgirl/Reverse Cowgirl, semantic `pelvis_hip` maps to VaM `hipControl` as the primary visible driver. `pelvisControl` is a light follower or static support controller, not the sole primary driver. BJ/HJ keep hip/pelvis static, static anchors stay static in position and rotation, and Person/root/world tracks remain forbidden.
+
 ### Handmade Reference Animations
 
 The handmade reference ZIP calibrates Cowgirl vs BJ/head-dominant vs Doggy vs hand/head gesture motion:
 
 ```powershell
 python -m vam_timeline_ai.cli import-handmade-reference-animations ^
-  --zip "G:\VAM\Saves\PluginData\animations\animations.zip" ^
+  --zip "<path-to-reference-animations.zip>" ^
   --out-dir data\runs\clean_v2\references\handmade_animations
 ```
 
@@ -361,8 +446,8 @@ Run the lightweight raw scan:
 
 ```powershell
 python -m vam_timeline_ai.cli scan-raw-folder ^
-  --raw-dir "G:\VAM\Research\MocapResearch" ^
-  --out "G:\VAM Timeline AI\data\audits\raw_scan"
+  --raw-dir "<path-to-local-vam-scenes>" ^
+  --out data\audits\raw_scan
 ```
 
 The scan writes:
@@ -377,23 +462,23 @@ It does not bake motion, infer deep semantics, export Timeline clips, run VaM, b
 Run from the project root:
 
 ```powershell
-cd "G:\VAM Timeline AI"
-$env:PYTHONPATH="G:\VAM Timeline AI\src"
+cd "<project-root>"
+$env:PYTHONPATH="src"
 ```
 
 1. Scan raw scenes:
 
 ```powershell
 python -m vam_timeline_ai.cli scan-raw-folder ^
-  --raw-dir "G:\VAM\Research\MocapResearch" ^
-  --out "G:\VAM Timeline AI\data\audits\raw_scan"
+  --raw-dir "<path-to-local-vam-scenes>" ^
+  --out data\audits\raw_scan
 ```
 
 2. Build the technical motion source index:
 
 ```powershell
 python -m vam_timeline_ai.cli build-motion-source-index ^
-  --raw-dir "G:\VAM\Research\MocapResearch" ^
+  --raw-dir "<path-to-local-vam-scenes>" ^
   --out data\semantic\motion_source_index.jsonl ^
   --report data\semantic\motion_source_index_report.md ^
   --recursive
@@ -815,6 +900,223 @@ References:
 - [Why Raw Timeline Coordinates Are Not Motion](references/WHY_RAW_TIMELINE_COORDINATES_ARE_NOT_MOTION.md)
 - [Trajectory Shape Analysis](references/TRAJECTORY_SHAPE_ANALYSIS.md)
 
+## Generated Relative Motion Flow
+
+Motion primitives are now used to synthesize relative controller curves. V0 synthesis creates a generated motion flow in `relative_body_motion` space from primitive group statistics such as trajectory shape, amplitude ranges, rhythm, and controller roles.
+
+This is not Timeline export and not clip stitching. Generated flows keep `export_ready: false`, exclude Person/root/world tracks, and are technical intermediates for future retargeting and safety validation.
+
+References:
+
+- [Motion Flow Synthesis V0](references/MOTION_FLOW_SYNTHESIS_V0.md)
+- [Generated Relative Motion Flow](references/GENERATED_RELATIVE_MOTION_FLOW.md)
+
+## Pose And Partner-Relative Semantics
+
+clean_v3 introduces a fuller Semantic Action model. Motion alone is not enough:
+Cowgirl generation now tracks actor pose, motion subtype, partner relation,
+contact/support targets, phase, and generation safety as separate fields before
+combining them.
+
+BJ/oral remains a valid semantic family. Cowgirl-specific filters exclude it
+from Cowgirl generation-safe sets, but the global semantic candidate inventory
+preserves it for future BJ/oral dataset work.
+
+For prompts such as `slow cowgirl grinding, leaning forward, hands on partner
+chest`, the plan must include rider/receiver roles, partner-pelvis-local frame,
+hand targets on `partner.chest`, knees/feet anchors, and no Person/root/world
+tracks.
+
+References:
+
+- [Pose Semantics](references/POSE_SEMANTICS.md)
+- [Semantic Actions: Pose Plus Motion](references/SEMANTIC_ACTIONS_POSE_PLUS_MOTION.md)
+- [Partner-Relative Interaction Semantics](references/PARTNER_RELATIVE_INTERACTION_SEMANTICS.md)
+- [Contact Targets And Support Constraints](references/CONTACT_TARGETS_AND_SUPPORT_CONSTRAINTS.md)
+- [Prompt To Interaction Plan](references/PROMPT_TO_INTERACTION_PLAN.md)
+- [clean_v3 Semantic Rescan](references/CLEAN_V3_SEMANTIC_RESCAN.md)
+
+## clean_v3 QA And Review Workflow
+
+clean_v3 is stricter and interaction-aware, but its candidate DBs are still
+audit inventories rather than ground truth. Human review findings are collected
+in an audit-only ledger so calibration can target recurring errors such as
+low-motion Cowgirl pose context, BJ/oral mistaken as Cowgirl, ambiguous contact
+support, duplicate review selection, and foot-anchor weirdness.
+
+The overnight QA workflow writes a dashboard, DB invariant report, clean_v2 to
+clean_v3 drift report, larger review batch plan, prompt capability matrix, and
+operator status report. It does not train ML, generate new Timeline animations,
+or modify `manual_labels.yaml`.
+
+Run:
+
+```powershell
+python -m vam_timeline_ai.cli run-clean-v3-overnight-qa ^
+  --run-dir data\runs\clean_v3 ^
+  --include-runs data\runs\clean_v2,data\runs\clean_v3
+```
+
+Review v16 should be checked before exporting any larger batch. Use the ledger
+and invariant report to decide the next calibration target, not as final labels.
+
+References:
+
+- [clean_v3 Status And QA](references/CLEAN_V3_STATUS_AND_QA.md)
+- [Human Review Memory](references/HUMAN_REVIEW_MEMORY.md)
+- [Semantic DB Invariants](references/SEMANTIC_DB_INVARIANTS.md)
+- [Review Batch Planning](references/REVIEW_BATCH_PLANNING.md)
+
+## Local Review UI
+
+The local Semantic Review Workbench helps validate clean_v3 review batches,
+candidate DB categories, hypotheses, error trends, and evidence scores without
+internet access or heavy dependencies. It is audit-only and does not modify
+`manual_labels.yaml`.
+
+Build the static fallback:
+
+```powershell
+python -m vam_timeline_ai.cli build-static-review-ui ^
+  --run-dir data\runs\clean_v3 ^
+  --review-dir data\runs\clean_v3\audits\semantic_review_010_v16 ^
+  --out-dir data\runs\clean_v3\audits\semantic_review_010_v16\review_ui_static
+```
+
+Open `review_ui_static\index.html`, review the cards, then export answers from
+the Export Answers tab. To append UI answers into the audit ledger:
+
+```powershell
+python -m vam_timeline_ai.cli ingest-review-ui-answers ^
+  --answers data\runs\clean_v3\audits\semantic_review_010_v16\human_review_ui_answers.jsonl ^
+  --review-dir data\runs\clean_v3\audits\semantic_review_010_v16 ^
+  --out-ledger data\runs\clean_v3\audits\human_review_ledger.jsonl ^
+  --report data\runs\clean_v3\audits\review_ui_answer_ingestion_report.md
+```
+
+References:
+
+- [Local Review UI](references/LOCAL_REVIEW_UI.md)
+- [Review Answer Ingestion](references/REVIEW_ANSWER_INGESTION.md)
+
+## Cowgirl Pose Subtypes
+
+Cowgirl pose semantics now distinguish frontal lean-forward, upright/kneeling,
+squat, and frontal lean-back supported contexts. `cowgirl_lean_back_supported`
+means the rider leans backward while remaining in a frontal Cowgirl relation,
+with hands behind her body for support, often on the partner legs or thighs.
+This is not reverse Cowgirl unless facing-away evidence is explicit.
+
+Support/contact labels also distinguish `hands_behind_support` and
+`hands_on_partner_legs_or_thighs`; these are not treated as hands-free or
+unknown support when evidence is present. All such labels remain audit
+calibration candidates until manually reviewed.
+
+References:
+
+- [Cowgirl Lean-back Supported Pose](references/COWGIRL_LEAN_BACK_SUPPORTED_POSE.md)
+- [Cowgirl Support Contexts](references/COWGIRL_SUPPORT_CONTEXTS.md)
+- [Front vs Reverse Cowgirl](references/FRONT_VS_REVERSE_COWGIRL.md)
+
+## ML Baseline Is Review-Assist Only
+
+Cowgirl ML Baseline v1 trains only on human-reviewed audit artifacts and uses
+grouped scene-level splits to avoid repeated-window leakage. Weak, silver,
+machine, and heuristic labels are not ground-truth targets.
+
+The model may rank candidates for review and highlight model-vs-heuristic
+disagreements. It must not write `manual_labels.yaml`, self-label the dataset,
+choose generation-safe clips automatically, or generate Timeline animation.
+
+References:
+
+- [Cowgirl ML Baseline V1](references/COWGIRL_ML_BASELINE_V1.md)
+- [ML Review Assistant Workflow](references/ML_REVIEW_ASSISTANT_WORKFLOW.md)
+
+## Local Visual Judge
+
+The local Visual Judge pipeline is a review-assist layer for VaM screenshots,
+contact sheets, GIFs, and MP4 previews. It prefers real VaM captures over
+digital-twin skeleton previews and uses local LM Studio only; no cloud APIs are
+called and no models are downloaded by this project.
+
+The preferred model for current experiments is `nsfwvision-v4-qwen3.5-9b`.
+Generic `Qwen2.5-VL-7B-Instruct` is documented only as a fallback because user
+testing showed unreliable VaM pose/family classification.
+
+Visual judge output is never ground truth by itself. Human review remains the
+only truth source, and the visual judge is used only to prioritize or explain
+manual review.
+
+References:
+
+- [LM Studio VLM Judge](references/LMSTUDIO_VLM_JUDGE.md)
+- [Visual Judge Result Schema](references/VISUAL_JUDGE_RESULT_SCHEMA.md)
+- [Visual Judge Model Calibration](references/VISUAL_JUDGE_MODEL_CALIBRATION.md)
+- [VaM Reality Capture Bridge](references/VAM_REALITY_CAPTURE_BRIDGE.md)
+- [Multisignal Triage With VLM](references/MULTISIGNAL_TRIAGE_WITH_VLM.md)
+
+## Top-Down Semantic Motion Architecture
+
+Generation now starts from semantic meaning, not controller movement. The
+intended direction is prompt -> motion intent -> pose/role/partner/contact
+requirements -> motion grammar -> parameterized relative motion -> controller
+curves -> Timeline export.
+
+Bottom-up features, heuristic candidate DBs, the Cowgirl ML ranker, and VLM
+judge outputs are review/calibration aids only. They do not define truth and do
+not write `manual_labels.yaml`. Controller curves are the output renderer. VaM
+Person/root/world transforms are forbidden generation targets; "root" in motion
+notes means pelvis/hip/abdomen body controls.
+
+References:
+
+- [Semantik Master Sourcebook](references/SEMANTIK_MASTER_SOURCEBOOK.md)
+- [Architecture Reset: Top-Down Semantics](references/ARCHITECTURE_RESET_TOP_DOWN_SEMANTICS.md)
+- [Semantic Motion Ontology](references/SEMANTIC_MOTION_ONTOLOGY.md)
+- [Motion Intent Translator](references/MOTION_INTENT_TRANSLATOR.md)
+- [Pose-First Semantic Resolver](references/POSE_FIRST_SEMANTIC_RESOLVER.md)
+- [Pose Motion Grammar](references/POSE_MOTION_GRAMMAR.md)
+- [Motion Parameter Calibration](references/MOTION_PARAMETER_CALIBRATION.md)
+
+## Semantic Stickman Previews
+
+Semantic Stickman previews are schematic ontology sanity checks. They do not use
+VaM, source-scene world coordinates, Person/root tracks, or native Timeline
+export. They test whether the top-down grammar can visually express:
+
+concept -> pose -> primary driver -> followers -> anchors/support -> motion.
+
+The current v2 gallery is written locally to
+`data/runs/clean_v3/generation/semantic_stickman_previews_v2/index.html`.
+It labels actor bodyparts, partner reference points, pelvis alignment targets,
+support/contact targets, and bed/floor anchors so Cowgirl/Doggy/BJ/Missionary
+concepts do not look like motion floating in empty space.
+
+The contact-aware v3 gallery is written to
+`data/runs/clean_v3/generation/semantic_stickman_previews_v3/index.html`.
+v3 builds motion examples around interaction constraints first, then renders the
+stickman pose. It shows the contact/alignment tolerance zone, target distance,
+and valid/invalid alignment status for each concept.
+
+References:
+
+- [Semantic Stickman Previews](references/SEMANTIC_STICKMAN_PREVIEWS.md)
+- [Ontology Visual Sanity Check](references/ONTOLOGY_VISUAL_SANITY_CHECK.md)
+
+## First Generated Motion Review
+
+The first generated motion review layer retargets synthesized relative motion onto a synthetic neutral controller baseline. Retargeting applies generated deltas to the baseline pose, keeps foot/knee anchors stable, validates distances and jumps, and renders technical previews.
+
+Any Timeline-style artifact from this layer is review-only. It does not use source scene world coordinates, does not include Person/root tracks, does not stitch clips, and does not claim production readiness.
+
+The current review-flow JSON is not native VaM Timeline plugin JSON and is not importable through Timeline. To test generated motion in VaM, use the generated `GeneratedMotionReviewPlayer.cs` script with the review-player JSON, which applies relative deltas from the current controller baseline.
+
+References:
+
+- [Relative Flow Retargeting V0](references/RELATIVE_FLOW_RETARGETING_V0.md)
+- [First Generated Motion Review](references/FIRST_GENERATED_MOTION_REVIEW.md)
+
 ## Public GitHub Safety
 
 This repository is public and should contain code, docs, tests, schemas, templates, and lightweight folder placeholders only. Generated local data, raw VaM scenes, baked arrays, previews, model files, and human labels must stay out of Git.
@@ -838,15 +1140,16 @@ python -m pip install -e ".[dev]"
 python -m pytest tests
 ```
 
-The code and tests do not require the real `G:\` data for unit tests. Synthetic tests cover source records, baked sample audit, controller mapping, feature extraction v1, weak/manual label separation, review queue de-duplication, and leakage-aware dataset metadata.
+The code and tests do not require local VaM scene data for unit tests. Synthetic tests cover source records, baked sample audit, controller mapping, feature extraction v1, weak/manual label separation, review queue de-duplication, and leakage-aware dataset metadata.
 
 ## Reference Projects
 
-Configured defaults:
+Configured local references are intentionally not stored in the public README.
+Use environment-specific paths for:
 
-- Technical compiler reference: `G:\VAM\Research\MocapResearch\vam_mocap_dataset_compiler`
-- Timeline source reference: `G:\VAM\Research\MocapResearch\vam-timeline-master`
-- Raw scenes: `G:\VAM\Research\MocapResearch`
-- Virtual Companion bridge reference: `G:\Virtual Companion`
+- a technical compiler reference checkout
+- the Timeline source reference checkout
+- local raw VaM scenes
+- optional local bridge/runtime references
 
-These are read-only references for this project setup.
+These references should be treated as read-only project setup and kept out of committed run databases.

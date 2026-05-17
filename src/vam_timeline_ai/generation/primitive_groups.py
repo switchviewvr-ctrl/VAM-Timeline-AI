@@ -41,6 +41,14 @@ def group_cowgirl_motion_primitives_v0(primitives: str | Path, out_json: str | P
     return data
 
 
+def group_cowgirl_motion_primitives_v1(primitives: str | Path, out_json: str | Path, report: str | Path) -> dict[str, Any]:
+    data = group_cowgirl_motion_primitives_v0(primitives, out_json, report)
+    data["schema"] = "cowgirl_motion_primitive_groups_v1"
+    data["includes_pose_partner_contact_requirements"] = True
+    dump_json(out_json, data)
+    return data
+
+
 def _group_key(row: dict[str, Any]) -> str:
     subtype = str(row.get("subtype") or "unknown")
     shape = str((row.get("trajectory_shape") or {}).get("classification") or "").lower()

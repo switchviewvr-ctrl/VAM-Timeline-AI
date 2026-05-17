@@ -68,6 +68,7 @@ def _write_report(flow: dict[str, Any], report: str | Path) -> None:
         "## Missing Pieces",
         "",
         "- Relative curve synthesis from primitive parameters",
+        "- Use `synthesize-motion-flow-v0` to create first real relative curves from primitive-group statistics",
         "- Retargeting to the current VaM pose",
         "- Anchor/contact constraint solving",
         "- Controller validity validation after synthesis",

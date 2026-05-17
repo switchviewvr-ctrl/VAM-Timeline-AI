@@ -2,7 +2,7 @@
 
 This project inspected technical modules from:
 
-`G:\VAM\Research\MocapResearch\vam_mocap_dataset_compiler\src\vam_mocap_dataset`
+`<VAM_TIMELINE_AI_MOCAP_COMPILER>/src/vam_mocap_dataset`
 
 ## Files Inspected
 

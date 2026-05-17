@@ -63,6 +63,56 @@ def build_semantic_candidate_db_v0(
     return rows
 
 
+def build_semantic_candidate_db_from_actions_v0(
+    semantic_actions: str | Path,
+    out_jsonl: str | Path,
+    out_csv: str | Path,
+    report: str | Path,
+) -> list[dict[str, Any]]:
+    """Build the clean_v3 central multi-family inventory from Semantic Actions.
+
+    This is not ML training data and does not treat machine labels as truth.
+    """
+    rows: list[dict[str, Any]] = []
+    for action in load_jsonl(semantic_actions):
+        wid = action.get("window_id")
+        if not wid:
+            continue
+        family = str(action.get("semantic_family") or "unknown")
+        preserve = family in {"cowgirl", "bj_oral", "doggy", "hand_gesture", "head_gesture", "receiver_response"}
+        rows.append({
+            "candidate_id": f"semantic_action_v0::{wid}",
+            "window_id": wid,
+            "pair_window_id": action.get("pair_window_id"),
+            "source_scene_file": action.get("source_scene_file"),
+            "technical_actor_id": action.get("technical_atom_id"),
+            "semantic_family": family if family in FAMILIES else "unknown",
+            "pose_family": action.get("pose_family"),
+            "pose_subtype": action.get("pose_subtype"),
+            "motion_subtype": action.get("motion_subtype"),
+            "partner_relation": action.get("partner_relation") or ["unknown"],
+            "contact_support": action.get("contact_support") or "unknown",
+            "phase": action.get("phase") or "unknown",
+            "generation_safe": bool(action.get("generation_safe")),
+            "safe_for_learning": bool(action.get("generation_safe")) and not action.get("conflict_flags"),
+            "invalidity_reason": ";".join(action.get("conflict_flags") or []),
+            "semantic_score": action.get("semantic_score"),
+            "pose_score": action.get("pose_score"),
+            "motion_score": action.get("motion_score"),
+            "interaction_score": action.get("interaction_score"),
+            "consistency_score": action.get("consistency_score"),
+            "warnings": action.get("warnings") or [],
+            "preserve_for_future_dataset": preserve,
+            "is_human_ground_truth": False,
+            "is_training_label": False,
+        })
+    rows.sort(key=lambda r: (r.get("semantic_family") != "cowgirl", r.get("semantic_family") != "bj_oral", -float(r.get("semantic_score") or 0.0)))
+    write_jsonl(out_jsonl, rows)
+    _write_actions_csv(rows, out_csv)
+    _write_actions_report(rows, report)
+    return rows
+
+
 def _from_cowgirl_record(row: dict[str, Any], bj: dict[str, Any], rel: dict[str, Any], traj: dict[str, Any]) -> dict[str, Any]:
     family = str(row.get("semantic_family") or "unknown")
     if family not in FAMILIES:
@@ -143,6 +193,65 @@ def _write_csv(rows: list[dict[str, Any]], out_csv: str | Path) -> None:
         writer.writeheader()
         for row in rows:
             writer.writerow({key: row.get(key) for key in fields})
+
+
+def _write_actions_csv(rows: list[dict[str, Any]], out_csv: str | Path) -> None:
+    target = Path(out_csv)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fields = [
+        "candidate_id",
+        "window_id",
+        "pair_window_id",
+        "semantic_family",
+        "pose_family",
+        "pose_subtype",
+        "motion_subtype",
+        "partner_relation",
+        "contact_support",
+        "phase",
+        "generation_safe",
+        "safe_for_learning",
+        "semantic_score",
+        "pose_score",
+        "motion_score",
+        "interaction_score",
+        "consistency_score",
+        "invalidity_reason",
+        "preserve_for_future_dataset",
+    ]
+    with target.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        for row in rows:
+            slim = {key: row.get(key) for key in fields}
+            slim["partner_relation"] = ";".join(row.get("partner_relation") or [])
+            writer.writerow(slim)
+
+
+def _write_actions_report(rows: list[dict[str, Any]], report: str | Path) -> None:
+    target = Path(report)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    families = Counter(r.get("semantic_family") for r in rows)
+    phases = Counter(r.get("phase") for r in rows)
+    contacts = Counter(r.get("contact_support") for r in rows)
+    lines = [
+        "# Semantic Candidate DB V0 Report",
+        "",
+        "This clean_v3 DB is built from Semantic Actions: pose + motion + partner relation + contact/support.",
+        "It is a candidate inventory, not ML training data or manual ground truth.",
+        "",
+        f"- Records: {len(rows)}",
+        f"- Generation-safe records: {sum(1 for r in rows if r.get('generation_safe'))}",
+        "",
+        "## Semantic Families",
+        "",
+    ]
+    lines.extend(f"- `{k}`: {v}" for k, v in families.most_common()) if families else lines.append("- None")
+    lines.extend(["", "## Phases", ""])
+    lines.extend(f"- `{k}`: {v}" for k, v in phases.most_common()) if phases else lines.append("- None")
+    lines.extend(["", "## Contact/Support", ""])
+    lines.extend(f"- `{k}`: {v}" for k, v in contacts.most_common()) if contacts else lines.append("- None")
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _write_report(rows: list[dict[str, Any]], report: str | Path) -> None:

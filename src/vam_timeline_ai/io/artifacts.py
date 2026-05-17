@@ -99,7 +99,7 @@ def _stale_warnings(old_artifacts: list[str]) -> list[str]:
 
 def _command_suggestions(run_root: Path) -> list[str]:
     return [
-        f"python -m vam_timeline_ai.cli build-motion-source-index --raw-dir \"G:\\VAM\\Research\\MocapResearch\" --out {run_root}\\semantic\\motion_source_index.jsonl --report {run_root}\\semantic\\motion_source_index_report.md --recursive",
+        f"python -m vam_timeline_ai.cli build-motion-source-index --raw-dir \"<path-to-local-vam-scenes>\" --out {run_root}\\semantic\\motion_source_index.jsonl --report {run_root}\\semantic\\motion_source_index_report.md --recursive",
         f"python -m vam_timeline_ai.cli extract-motion-samples --source-index {run_root}\\semantic\\motion_source_index.jsonl --out-dir {run_root}\\baked\\samples --index-out {run_root}\\baked\\motion_sample_index.jsonl --fps 60",
         f"python -m vam_timeline_ai.cli audit-data-integrity --source-index {run_root}\\semantic\\motion_source_index.jsonl --sample-index {run_root}\\baked\\motion_sample_index.jsonl --windows {run_root}\\semantic\\movement_windows.jsonl --features {run_root}\\features\\cowgirl_window_features_v1.jsonl --dataset {run_root}\\ml\\datasets\\cowgirl_ml_dataset_v1.npz --strict true --out {run_root}\\audits\\data_integrity_report.md",
     ]
@@ -122,4 +122,3 @@ def _write_report(manifest: dict[str, Any], report: str | Path) -> None:
     lines.extend(f"```powershell\n{cmd}\n```" for cmd in manifest["command_suggestions"])
     Path(report).parent.mkdir(parents=True, exist_ok=True)
     Path(report).write_text("\n".join(lines) + "\n", encoding="utf-8")
-
