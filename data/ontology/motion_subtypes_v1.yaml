@@ -1,0 +1,85 @@
+schema_version: motion_subtypes_v1
+subtypes:
+  cowgirl_grinding:
+    family: cowgirl
+    primary_motion_center: pelvis_hip
+    path_shape: [oval, circular, figure_8]
+    vertical_amplitude: low_to_medium
+    plane: xz_dominant
+    rotations: [pitch, roll, yaw]
+    followers: [chest_counter_balance, head_stabilized_lag]
+  cowgirl_riding:
+    family: cowgirl
+    primary_motion_center: pelvis_hip
+    path_shape: [vertical_forward_back_loop]
+    vertical_amplitude: medium_to_high
+    followers: [thigh_absorption, chest_delayed_follow, head_stabilized_lag]
+  cowgirl_vertical_bounce:
+    family: cowgirl
+    primary_motion_center: pelvis_hip
+    path_shape: [up_down]
+    vertical_amplitude: dominant
+    followers: [knees_thighs_absorb, chest_head_follow_through]
+  cowgirl_rocking:
+    family: cowgirl
+    primary_motion_center: pelvis_hip
+    path_shape: [forward_back_rock]
+    vertical_amplitude: low_to_medium
+  cowgirl_lean_forward_supported:
+    family: cowgirl
+    pose_subtype: cowgirl_lean_forward_supported
+    torso_lean: forward
+    support_contexts: [hands_forward_support, hands_on_partner_chest, hands_on_floor_or_bed]
+  cowgirl_lean_back_supported:
+    family: cowgirl
+    pose_subtype: cowgirl_lean_back_supported
+    torso_lean: backward
+    support_contexts: [hands_behind_support, hands_on_partner_legs_or_thighs]
+    facing_context: front_cowgirl
+    not_reverse: true
+  cowgirl_pose_context_low_motion:
+    family: pose_context_hold
+    pose_family_hint: cowgirl
+    primary_motion_center: static_pose
+  cowgirl_transition_setup:
+    family: transition_setup
+    pose_family_hint: cowgirl
+    primary_motion_center: full_body_transition
+  reverse_cowgirl_vertical_bounce:
+    family: reverse_cowgirl
+    primary_motion_center: pelvis_hip
+    required_facing_context: back_to_partner
+  reverse_cowgirl_grinding:
+    family: reverse_cowgirl
+    primary_motion_center: pelvis_hip
+    required_facing_context: back_to_partner
+  doggy_forward_back:
+    family: doggy
+    primary_motion_center: pelvis_hip
+    required_relation: partner_behind
+  doggy_planar_grind:
+    family: doggy
+    primary_motion_center: pelvis_hip
+    required_relation: partner_behind
+  bj_head_bob:
+    family: bj_oral
+    primary_motion_center: head_neck
+    target_region: partner_pelvis_or_genital_area
+  bj_head_circular_micro_motion:
+    family: bj_oral
+    primary_motion_center: head_neck
+    target_region: partner_pelvis_or_genital_area
+  bj_hand_assisted:
+    family: bj_oral
+    primary_motion_center: head_neck
+    secondary_motion_centers: [hands]
+  hand_repetitive_up_down:
+    family: handjob
+    primary_motion_center: hands
+    target_region: partner_pelvis_or_genital_area
+  missionary_counter_thrust:
+    family: missionary
+    primary_motion_center: pelvis_counter_driver
+  missionary_impact_absorption:
+    family: missionary
+    primary_motion_center: chest_impact_follower

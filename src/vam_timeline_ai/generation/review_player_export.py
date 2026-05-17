@@ -219,7 +219,7 @@ def _write_export_report(data: dict[str, Any], report: str | Path) -> None:
 
 
 def _write_instructions(path: Path, json_out: Path, script_source: Path, copied_to: str | None, json_copied_to: str | None) -> None:
-    copy_target = copied_to or "G:\\VAM\\Custom\\Scripts\\VAMTimelineAI\\GeneratedMotionReviewPlayer.cs"
+    copy_target = copied_to or "<VaM>/Custom/Scripts/VAMTimelineAI/GeneratedMotionReviewPlayer.cs"
     secure_json = DEFAULT_VAM_SECURE_JSON_PATH
     lines = [
         "# VaM Generated Motion Review Player Instructions",

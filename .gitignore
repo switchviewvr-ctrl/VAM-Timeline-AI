@@ -57,6 +57,8 @@ data/**
 !data/labels/manual_labels.schema_v2.yaml
 !data/cowgirl_db/
 !data/cowgirl_db/.gitkeep
+!data/ontology/
+!data/ontology/*.yaml
 
 # Never commit human labels or generated review batches by accident.
 data/labels/manual_labels.yaml
@@ -104,3 +106,6 @@ references/external/*.zip
 *.log
 logs/
 *.tmp
+*.private.json
+vam_runtime/bepinex/
+data/runs/local_vam_animation_exports/

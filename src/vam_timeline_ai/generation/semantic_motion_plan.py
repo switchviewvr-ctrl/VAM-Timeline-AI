@@ -21,6 +21,9 @@ class PrimitiveQuery:
     anchor_complete_required: bool = True
     requested_pose_family: str = "unknown"
     requested_pose_subtype: str = "unknown"
+    support_context: str = "unknown"
+    torso_lean_direction: str = "unknown"
+    facing_context: str = "unknown"
     partner_relation: str = "unknown"
     coordinate_frame: str = "body_relative"
     contact_targets: dict[str, str] = field(default_factory=dict)
@@ -60,6 +63,9 @@ class SemanticMotionPlan:
     partner_role: str = "unknown"
     requested_pose_family: str = "unknown"
     requested_pose_subtype: str = "unknown"
+    support_context: str = "unknown"
+    torso_lean_direction: str = "unknown"
+    facing_context: str = "unknown"
     warnings: list[str] = field(default_factory=list)
     is_final_text_to_animation: bool = False
 
@@ -73,6 +79,9 @@ class SemanticMotionPlan:
             "partner_role": self.partner_role,
             "requested_pose_family": self.requested_pose_family,
             "requested_pose_subtype": self.requested_pose_subtype,
+            "support_context": self.support_context,
+            "torso_lean_direction": self.torso_lean_direction,
+            "facing_context": self.facing_context,
             "sequence": [phase.to_dict() for phase in self.sequence],
             "warnings": self.warnings,
             "is_final_text_to_animation": self.is_final_text_to_animation,

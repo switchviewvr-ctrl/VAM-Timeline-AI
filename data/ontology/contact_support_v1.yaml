@@ -1,0 +1,12 @@
+schema_version: contact_support_v1
+contact_support:
+  hands_free: {target_region: none, support_role: none}
+  hands_on_partner_chest: {target_region: partner_chest, support_role: front_support}
+  hands_on_partner_hips: {target_region: partner_hips, support_role: partner_support}
+  hands_on_partner_legs_or_thighs: {target_region: partner_legs_or_thighs, support_role: behind_or_lower_partner_support}
+  hands_on_floor_or_bed: {target_region: floor_or_bed, support_role: surface_support}
+  hands_behind_support: {target_region: behind_body_support, support_role: backward_support}
+  hands_behind_on_floor_or_bed: {target_region: floor_or_bed_behind_body, support_role: backward_surface_support}
+  hands_on_partner_pelvis_or_genital_area: {target_region: partner_pelvis_or_genital_area, support_role: handjob_or_oral_support}
+  ambiguous_partner_contact: {target_region: partner_unknown, support_role: ambiguous}
+  unknown: {target_region: unknown, support_role: unknown}

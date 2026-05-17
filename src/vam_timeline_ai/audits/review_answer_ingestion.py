@@ -17,6 +17,7 @@ def ingest_review_ui_answers(
     review_dir: str | Path,
     out_ledger: str | Path,
     report: str | Path,
+    overwrite: bool = False,
 ) -> dict[str, Any]:
     answer_path = Path(answers)
     review = Path(review_dir)
@@ -30,18 +31,34 @@ def ingest_review_ui_answers(
         for row in existing
     }
     new_records = []
+    duplicate_records = 0
+    replaced_records = 0
+    replacement_keys = set()
     for answer in validated:
         record = _ledger_record(answer, review, system_rows.get(answer["review_id"]) or {})
         key = (record.get("source_review_folder"), record.get("review_id"), record.get("source") or "")
         if key not in existing_keys:
             new_records.append(record)
-    merged = existing + new_records
+        elif overwrite:
+            new_records.append(record)
+            replacement_keys.add(key)
+            replaced_records += 1
+        else:
+            duplicate_records += 1
+    merged_existing = [
+        row
+        for row in existing
+        if (row.get("source_review_folder"), row.get("review_id"), row.get("source") or "") not in replacement_keys
+    ]
+    merged = merged_existing + new_records
     write_jsonl(ledger_path, merged)
-    _write_report(validated, new_records, report)
+    _write_report(validated, new_records, report, duplicate_records=duplicate_records, replaced_records=replaced_records)
     return {
         "status": "ok",
         "answers": len(validated),
         "new_ledger_records": len(new_records),
+        "duplicates_skipped": duplicate_records,
+        "records_replaced": replaced_records,
         "out_ledger": str(ledger_path),
         "report": str(report),
     }
@@ -66,6 +83,7 @@ def _system_rows(review: Path) -> dict[str, dict[str, Any]]:
 
 
 def _ledger_record(answer: dict[str, Any], review: Path, system: dict[str, Any]) -> dict[str, Any]:
+    derived = _derive_from_answer(answer)
     return {
         "review_id": answer["review_id"],
         "source": "review_ui",
@@ -76,26 +94,44 @@ def _ledger_record(answer: dict[str, Any], review: Path, system: dict[str, Any])
         "start_seconds": system.get("start_seconds"),
         "end_seconds": system.get("end_seconds"),
         "system_semantic_family": system.get("semantic_family") or "",
-        "human_semantic_family": answer.get("actual_semantic_family") or "",
+        "human_semantic_family": answer.get("actual_semantic_family") or derived.get("semantic_family") or "",
         "system_pose": _join(system.get("pose_family"), system.get("pose_subtype")),
-        "human_pose": answer.get("actual_pose") or "",
+        "human_pose": answer.get("actual_pose") or derived.get("pose") or "",
         "system_motion": system.get("motion_subtype") or "",
-        "human_motion": answer.get("actual_motion") or "",
+        "human_motion": answer.get("actual_motion") or derived.get("motion") or "",
         "system_partner_relation": _join(system.get("partner_relation")),
         "human_partner_relation": answer.get("actual_partner_relation") or "",
         "system_contact_support": system.get("contact_support") or "",
-        "human_contact_support": answer.get("actual_contact_support") or "",
+        "human_contact_support": answer.get("actual_contact_support") or derived.get("contact_support") or "",
         "system_generation_safe": system.get("generation_safe"),
-        "human_generation_safe": answer.get("actual_generation_safe") or "",
+        "human_generation_safe": answer.get("actual_generation_safe") or derived.get("generation_safe") or "",
         "verdict": answer.get("verdict") or _derive_verdict(answer),
-        "error_tags": answer.get("error_tags") or [],
+        "error_tags": list(dict.fromkeys((answer.get("error_tags") or []) + derived.get("error_tags", []))),
         "notes": answer.get("notes") or "",
+        "screenshot_count": len(answer.get("screenshots") or []),
+        "screenshots": answer.get("screenshots") or [],
         "is_human_ground_truth": False,
         "is_training_label": False,
     }
 
 
 def _derive_verdict(answer: dict[str, Any]) -> str:
+    labels = set(answer.get("review_labels") or [])
+    notes = str(answer.get("notes") or "").lower()
+    if labels & {"correct_clean_cowgirl_motion", "correct_short_cowgirl_motion", "correct_lean_back_supported_cowgirl", "front_cowgirl_not_reverse"}:
+        return "correct"
+    if labels & {"cowgirl_pose_only_low_motion", "cowgirl_transition_intro_alignment", "hands_behind_support_correct", "hands_on_partner_legs_or_thighs_correct"}:
+        return "partially_correct"
+    if labels & {"standing_hand_head_not_cowgirl", "bj_oral_not_cowgirl", "wrong_partner_context", "wrong_contact_support", "wrongly_marked_reverse_cowgirl", "broken_pose_or_bad_data"}:
+        return "wrong"
+    if "unknown_unclear" in labels:
+        return "unclear"
+    if any(bit in notes for bit in ["eindeutig bj", "bj animation", "hat mit cowgirl nix zu tun", "teleportiert"]):
+        return "wrong"
+    if any(bit in notes for bit in ["nicht zuzuordnen", "kann man absolut nicht", "fehlt im ordner", "keine bewegung"]):
+        return "unclear"
+    if "cowgirl" in notes and any(bit in notes for bit in ["grinding", "riding", "bounce", "oval", "hüftanimation", "entsprechender animation"]):
+        return "correct"
     checks = [
         answer.get("semantic_family_correct"),
         answer.get("pose_correct"),
@@ -114,7 +150,102 @@ def _derive_verdict(answer: dict[str, Any]) -> str:
     return "partially_correct"
 
 
-def _write_report(answers: list[dict[str, Any]], new_records: list[dict[str, Any]], report: str | Path) -> None:
+def _derive_from_answer(answer: dict[str, Any]) -> dict[str, Any]:
+    derived = _derive_from_review_labels(answer.get("review_labels") or [])
+    text_derived = _derive_from_free_text(str(answer.get("notes") or ""))
+    for key, value in text_derived.items():
+        if key == "error_tags":
+            derived["error_tags"] = list(dict.fromkeys((derived.get("error_tags") or []) + value))
+        else:
+            derived.setdefault(key, value)
+    return derived
+
+
+def _derive_from_review_labels(labels: list[str]) -> dict[str, Any]:
+    label_set = set(labels)
+    out: dict[str, Any] = {"error_tags": []}
+    if label_set & {"correct_clean_cowgirl_motion", "correct_short_cowgirl_motion", "cowgirl_pose_only_low_motion", "cowgirl_transition_intro_alignment", "correct_lean_back_supported_cowgirl", "front_cowgirl_not_reverse"}:
+        out["semantic_family"] = "cowgirl"
+    if "bj_oral_not_cowgirl" in label_set:
+        out["semantic_family"] = "bj_oral"
+        out["error_tags"].append("bj_oral_as_cowgirl")
+    if "standing_hand_head_not_cowgirl" in label_set:
+        out["semantic_family"] = "standing_hand_head_gesture"
+        out["error_tags"].append("standing_hand_head_as_cowgirl")
+    if "correct_clean_cowgirl_motion" in label_set:
+        out["motion"] = "clean_cowgirl_motion"
+    if "correct_short_cowgirl_motion" in label_set:
+        out["motion"] = "clean_cowgirl_motion_low_confidence_short"
+    if "cowgirl_pose_only_low_motion" in label_set:
+        out["motion"] = "low_motion_hold"
+        out["error_tags"].append("low_motion_hold")
+    if "cowgirl_transition_intro_alignment" in label_set:
+        out["motion"] = "transition_intro_alignment"
+        out["error_tags"].append("intro_alignment")
+    if "correct_lean_back_supported_cowgirl" in label_set:
+        out["pose"] = "cowgirl_lean_back_supported"
+    if "hands_behind_support_correct" in label_set:
+        out["contact_support"] = "hands_behind_support"
+    if "hands_on_partner_legs_or_thighs_correct" in label_set:
+        out["contact_support"] = "hands_on_partner_legs_or_thighs"
+    if "wrong_partner_context" in label_set:
+        out["error_tags"].append("partner_context_missing")
+    if "wrong_contact_support" in label_set:
+        out["error_tags"].append("contact_wrong_target")
+    if "broken_pose_or_bad_data" in label_set:
+        out["error_tags"].append("pose_broken")
+    return out
+
+
+def _derive_from_free_text(notes: str) -> dict[str, Any]:
+    text = notes.lower()
+    out: dict[str, Any] = {"error_tags": []}
+    if not text.strip():
+        return out
+    if "bj" in text or "kopfbewegung" in text:
+        out["semantic_family"] = "bj_oral"
+        out["motion"] = "bj_oral_motion"
+        out["error_tags"].append("bj_oral_as_cowgirl")
+    elif any(bit in text for bit in ["hat mit cowgirl nix zu tun", "aufsteh-animation", "hinlegt", "nach vorn geschoben"]):
+        out["semantic_family"] = "unknown"
+        out["error_tags"].append("not_cowgirl")
+    elif "cowgirl" in text:
+        out["semantic_family"] = "cowgirl"
+
+    if "upright cowgirl" in text:
+        out["pose"] = "cowgirl_upright"
+    elif "lean forward" in text or "hocke" in text:
+        out["pose"] = "cowgirl_lean_forward_supported"
+    elif "cowgirl pose" in text:
+        out.setdefault("pose", "cowgirl_pose_context")
+
+    if any(bit in text for bit in ["grinding", "riding", "bounce", "oval", "hüftanimation", "teasing"]):
+        out.setdefault("motion", "clean_cowgirl_motion")
+    if "transition" in text:
+        out["motion"] = "transition_intro_alignment"
+        out["error_tags"].append("intro_alignment")
+    if any(bit in text for bit in ["hüften bewegen sich nicht", "keine cowgirl animation", "keine bewegung", "ohne bewegung", "nur chest und pelvis"]):
+        out["motion"] = "low_motion_or_no_clear_hip_motion"
+        out["error_tags"].append("no_clear_hip_motion")
+    if "zu kurz" in text:
+        out["motion"] = "clean_cowgirl_motion_low_confidence_short"
+        out["error_tags"].append("short_window_low_confidence")
+
+    if any(bit in text for bit in ["fuß controller fehlen", "controller fehlen", "teleportiert", "controller sind zuweit auseinander", "fehlt im ordner"]):
+        out["generation_safe"] = "false"
+        out["error_tags"].append("controller_missing_or_invalid")
+    if any(bit in text for bit in ["nicht zuzuordnen", "kann man absolut nicht", "fehlt im ordner"]):
+        out["error_tags"].append("unknown_unclear")
+    return out
+
+
+def _write_report(
+    answers: list[dict[str, Any]],
+    new_records: list[dict[str, Any]],
+    report: str | Path,
+    duplicate_records: int = 0,
+    replaced_records: int = 0,
+) -> None:
     verdicts = Counter((a.get("verdict") or _derive_verdict(a)) for a in answers)
     tags = Counter(tag for a in answers for tag in (a.get("error_tags") or []))
     family_known = [a for a in answers if a.get("semantic_family_correct") in {"true", "false"}]
@@ -126,6 +257,8 @@ def _write_report(answers: list[dict[str, Any]], new_records: list[dict[str, Any
         "",
         f"- Answers read: {len(answers)}",
         f"- New ledger records appended: {len(new_records)}",
+        f"- Duplicates skipped: {duplicate_records}",
+        f"- Records replaced: {replaced_records}",
         "",
         "## Verdict Counts",
         "",

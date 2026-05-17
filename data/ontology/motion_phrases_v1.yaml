@@ -1,0 +1,75 @@
+schema_version: motion_phrases_v1
+phrases:
+  cowgirl: {family: cowgirl}
+  cowgirl grinding: {family: cowgirl, motion_subtype: cowgirl_grinding}
+  grinding: {motion_subtype: cowgirl_grinding}
+  grind: {motion_subtype: cowgirl_grinding}
+  riding: {motion_subtype: cowgirl_riding}
+  reiten: {family: cowgirl, motion_subtype: cowgirl_riding}
+  bounce: {motion_subtype: cowgirl_vertical_bounce}
+  bouncing: {motion_subtype: cowgirl_vertical_bounce}
+  hips bouncing up and down: {motion_subtype: cowgirl_vertical_bounce}
+  rocking: {motion_subtype: cowgirl_rocking}
+  slow: {tempo: slow}
+  langsam: {tempo: slow}
+  fast: {tempo: fast}
+  schnell: {tempo: fast}
+  gentle: {style: gentle}
+  sanft: {style: gentle}
+  rough: {style: rough}
+  hart: {style: rough}
+  teasing: {style: teasing}
+  intro: {phase: intro_alignment}
+  transition: {phase: transition_setup}
+  uebergang: {phase: transition_setup}
+  hold: {phase: pose_context_hold}
+  cowgirl zurückgelehnt: {family: cowgirl, pose_subtype: cowgirl_lean_back_supported, torso_lean: backward, facing_context: front_cowgirl, not_reverse: true}
+  cowgirl zurueckgelehnt: {family: cowgirl, pose_subtype: cowgirl_lean_back_supported, torso_lean: backward, facing_context: front_cowgirl, not_reverse: true}
+  lean back cowgirl: {family: cowgirl, pose_subtype: cowgirl_lean_back_supported, torso_lean: backward, facing_context: front_cowgirl, not_reverse: true}
+  cowgirl leaning back: {family: cowgirl, pose_subtype: cowgirl_lean_back_supported, torso_lean: backward, facing_context: front_cowgirl, not_reverse: true}
+  nach hinten gelehnt: {pose_modifier: lean_back, pose_subtype: cowgirl_lean_back_supported, torso_lean: backward, facing_context: front_cowgirl, not_reverse: true}
+  stützt sich hinten ab: {support_context: hands_behind_support, contact_support: hands_behind_support}
+  stuetzt sich hinten ab: {support_context: hands_behind_support, contact_support: hands_behind_support}
+  hands behind: {support_context: hands_behind_support, contact_support: hands_behind_support}
+  stützt sich an seinen beinen ab: {contact_support: hands_on_partner_legs_or_thighs}
+  stuetzt sich an seinen beinen ab: {contact_support: hands_on_partner_legs_or_thighs}
+  stützt sich an seinen oberschenkeln ab: {contact_support: hands_on_partner_legs_or_thighs}
+  stuetzt sich an seinen oberschenkeln ab: {contact_support: hands_on_partner_legs_or_thighs}
+  hände auf seinen oberschenkeln: {contact_support: hands_on_partner_legs_or_thighs}
+  haende auf seinen oberschenkeln: {contact_support: hands_on_partner_legs_or_thighs}
+  hände auf seinen beinen: {contact_support: hands_on_partner_legs_or_thighs}
+  haende auf seinen beinen: {contact_support: hands_on_partner_legs_or_thighs}
+  hands on thighs: {contact_support: hands_on_partner_legs_or_thighs}
+  hands on partner legs: {contact_support: hands_on_partner_legs_or_thighs}
+  hands on his legs: {contact_support: hands_on_partner_legs_or_thighs}
+  reverse cowgirl: {family: reverse_cowgirl, facing_context: back_to_partner}
+  rückwärts auf ihm: {family: reverse_cowgirl, facing_context: back_to_partner}
+  rueckwaerts auf ihm: {family: reverse_cowgirl, facing_context: back_to_partner}
+  mit dem rücken zu ihm: {family: reverse_cowgirl, facing_context: back_to_partner}
+  mit dem ruecken zu ihm: {family: reverse_cowgirl, facing_context: back_to_partner}
+  doggy: {family: doggy}
+  doggy style: {family: doggy}
+  bj: {family: bj_oral}
+  blowjob: {family: bj_oral}
+  oral: {family: bj_oral}
+  blasen: {family: bj_oral}
+  handjob: {family: handjob}
+  hj: {family: handjob}
+  missionary: {family: missionary}
+  missionar: {family: missionary}
+  hands on partner chest: {contact_support: hands_on_partner_chest}
+  leaning forward: {pose_subtype: cowgirl_lean_forward_supported, torso_lean: forward}
+  lean forward: {pose_subtype: cowgirl_lean_forward_supported, torso_lean: forward}
+  hands on man's chest: {contact_support: hands_on_partner_chest}
+  hands on his chest: {contact_support: hands_on_partner_chest}
+  hände auf brust: {contact_support: hands_on_partner_chest}
+  haende auf brust: {contact_support: hands_on_partner_chest}
+  hands on shoulders: {contact_support: hands_on_partner_chest}
+  hände auf hüfte: {contact_support: hands_on_partner_hips}
+  haende auf huefte: {contact_support: hands_on_partner_hips}
+  hands on hips: {contact_support: hands_on_partner_hips}
+  hände auf boden: {contact_support: hands_on_floor_or_bed}
+  haende auf boden: {contact_support: hands_on_floor_or_bed}
+  hands on floor: {contact_support: hands_on_floor_or_bed}
+  hands on bed: {contact_support: hands_on_floor_or_bed}
+  hands free: {contact_support: hands_free}

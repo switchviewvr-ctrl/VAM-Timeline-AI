@@ -31,6 +31,9 @@ def _classify_interaction_row(row: dict[str, Any], pose: dict[str, dict[str, Any
     partner_pose = pose.get(row.get("partner_window_id"), {})
     chest = _num(row.get("hands_on_partner_chest_score"))
     hips = _num(row.get("hands_on_partner_hips_score"))
+    legs = _num(row.get("hands_on_partner_legs_score"))
+    thighs = _num(row.get("hands_on_partner_thighs_score"))
+    behind = _num(row.get("hands_behind_partner_support_score"))
     above = _num(row.get("rider_above_partner_score"))
     align = _num(row.get("pelvis_alignment_score"))
     partner_lying = _num(row.get("partner_lying_score"))
@@ -45,12 +48,35 @@ def _classify_interaction_row(row: dict[str, Any], pose: dict[str, dict[str, Any
         relations.append("rider_facing_partner")
     support = "unknown"
     contact_targets: dict[str, Any] = {}
-    if chest >= 0.55:
+    lower_body_score = max(legs, thighs)
+    contact_scores = {
+        "partner_chest": chest,
+        "partner_hips": hips,
+        "partner_legs_or_thighs": lower_body_score,
+    }
+    ranked = sorted(contact_scores.items(), key=lambda item: item[1], reverse=True)
+    best_target, best_score = ranked[0]
+    second_target, second_score = ranked[1]
+    margin = max(0.0, best_score - second_score)
+    ambiguous = best_score >= 0.35 and margin < 0.12
+    if behind >= 0.45 and lower_body_score >= 0.45 and lower_body_score >= max(chest, hips) + 0.08:
+        support = "hands_on_partner_legs_or_thighs"
+        contact_targets = {"lHand": "partner.leg_or_thigh", "rHand": "partner.leg_or_thigh"}
+    elif behind >= 0.45 and max(legs, thighs, hips) >= 0.35:
+        support = "ambiguous_behind_support"
+        contact_targets = {"lHand": "partner.lower_body_uncertain", "rHand": "partner.lower_body_uncertain"}
+    elif behind >= 0.45:
+        support = "hands_behind_support"
+        contact_targets = {"lHand": "behind_support_unknown", "rHand": "behind_support_unknown"}
+    elif chest >= 0.55 and chest >= max(hips, legs, thighs) + 0.12:
         support = "hands_on_partner_chest"
         contact_targets = {"lHand": "partner.chest", "rHand": "partner.chest"}
-    elif hips >= 0.45:
+    elif hips >= 0.45 and hips >= max(chest, legs, thighs) + 0.08:
         support = "hands_on_partner_hips"
         contact_targets = {"lHand": "partner.pelvis", "rHand": "partner.pelvis"}
+    elif ambiguous:
+        support = "ambiguous_partner_contact"
+        contact_targets = {"lHand": best_target, "rHand": best_target}
     elif "hands_forward_support" in (actor_pose.get("support_context") or []):
         support = "hands_on_floor_or_bed"
         contact_targets = {"lHand": "floor_or_bed", "rHand": "floor_or_bed"}
@@ -61,14 +87,16 @@ def _classify_interaction_row(row: dict[str, Any], pose: dict[str, dict[str, Any
         family = "cowgirl"
     elif actor_pose.get("pose_family") == "bj_oral":
         family = "bj_oral"
-    elif support.startswith("hands_on"):
+    elif support.startswith("hands_on") or support in {"hands_behind_support", "ambiguous_behind_support"}:
         family = "hand_support"
-    confidence = max(chest, hips, above * 0.7, align * 0.4)
+    confidence = max(chest, hips, legs, thighs, behind, above * 0.7, align * 0.4)
     warnings = list(row.get("warnings") or [])
     if not row.get("pair_window_id"):
         warnings.append("Pair context is missing; interaction remains unknown.")
     if support == "hands_on_partner_chest" and not row.get("partner_actor_id"):
         warnings.append("Partner chest support requires partner target evidence.")
+    if support in {"hands_on_partner_legs_or_thighs", "ambiguous_behind_support"} and row.get("partner_leg_thigh_approximation_used"):
+        warnings.append("Partner leg/thigh support used approximate lower-body targets; review before generation.")
     return InteractionSemanticRecord(
         window_id=wid,
         pair_window_id=row.get("pair_window_id"),
@@ -83,6 +111,16 @@ def _classify_interaction_row(row: dict[str, Any], pose: dict[str, dict[str, Any
         contact_targets=contact_targets,
         support_context=support,
         interaction_confidence=round(min(1.0, confidence), 6),
+        contact_support_confidence=round(min(1.0, best_score), 6),
+        contact_support_margin=round(margin, 6),
+        contact_support_ambiguous=bool(ambiguous or support in {"ambiguous_partner_contact", "ambiguous_behind_support"}),
+        best_contact_target=best_target,
+        second_best_contact_target=second_target,
+        partner_context_confidence=round(_num(row.get("partner_context_confidence")), 6),
+        hands_on_partner_legs_score=round(legs, 6),
+        hands_on_partner_thighs_score=round(thighs, 6),
+        hands_behind_partner_support_score=round(behind, 6),
+        partner_leg_thigh_approximation_used=bool(row.get("partner_leg_thigh_approximation_used")),
         warnings=_dedupe(warnings),
     )
 

@@ -13,7 +13,7 @@ import webbrowser
 
 import yaml
 
-from vam_timeline_ai.io.json_utils import load_jsonl, write_jsonl
+from vam_timeline_ai.io.json_utils import load_jsonl, safe_id_for_path, write_jsonl
 from vam_timeline_ai.ui.review_ui_assets import APP_JS, INDEX_HTML, STYLE_CSS
 
 
@@ -44,6 +44,14 @@ COMPACT_CANDIDATE_FIELDS = [
     "motion_score",
     "interaction_score",
     "contact_support_confidence",
+    "torso_lean_direction",
+    "facing_context",
+    "support_context",
+    "hands_behind_support_score",
+    "hands_on_partner_legs_score",
+    "hands_on_partner_thighs_score",
+    "partner_leg_support_confidence",
+    "facing_confidence",
     "warnings",
 ]
 
@@ -98,11 +106,20 @@ def build_review_ui_data(run: Path, review: Path) -> dict[str, Any]:
         for r in load_jsonl(review / "vam_review_package" / "vam_review_manifest.jsonl")
         if r.get("review_id")
     }
+    digital_twin_rows = _load_digital_twin_preview_rows(review)
+    visual_rows = _load_visual_judge_rows(review)
+    triage_rows = _load_multisignal_rows(review)
+    ontology_rows = _load_ontology_rows(run)
     review_items = []
     for rid in sorted(set(review_rows) | set(manifest_rows)):
         merged = {}
         merged.update(review_rows.get(rid) or {})
         merged.update(_non_empty(manifest_rows.get(rid) or {}))
+        merged.update(_non_empty(digital_twin_rows.get(rid) or {}))
+        merged.update(_non_empty(visual_rows.get(rid) or {}))
+        merged.update(_non_empty(triage_rows.get(rid) or {}))
+        wid = str(merged.get("window_id") or "")
+        merged.update(_non_empty(ontology_rows.get(wid) or {}))
         _add_item_paths(merged, review)
         review_items.append(_normalize_review_item(merged))
     candidates = _load_compact_candidates(run)
@@ -139,10 +156,34 @@ def answer_schema() -> dict[str, Any]:
             "generation_safe_correct",
             "actual_generation_safe",
             "verdict",
+            "review_labels",
             "error_tags",
+            "screenshots",
+            "visual_judge_verdict",
             "notes",
         ],
         "allowed_correctness": ["true", "false", "unknown", "not_applicable"],
+        "review_labels": [
+            "correct_clean_cowgirl_motion",
+            "correct_short_cowgirl_motion",
+            "cowgirl_pose_only_low_motion",
+            "cowgirl_transition_intro_alignment",
+            "standing_hand_head_not_cowgirl",
+            "bj_oral_not_cowgirl",
+            "receiver_response_not_rider_motion",
+            "wrong_partner_context",
+            "wrong_contact_support",
+            "correct_lean_back_supported_cowgirl",
+            "hands_behind_support_correct",
+            "hands_on_partner_legs_or_thighs_correct",
+            "front_cowgirl_not_reverse",
+            "wrongly_marked_reverse_cowgirl",
+            "broken_pose_or_bad_data",
+            "unknown_unclear",
+        ],
+        "review_questions": [
+            "Write one short free-text note about what is correct or wrong.",
+        ],
         "audit_only": True,
         "writes_manual_labels": False,
     }
@@ -174,8 +215,10 @@ def validate_answer(row: dict[str, Any]) -> dict[str, Any]:
             value = str(value or "unknown")
             if value not in allowed_correctness:
                 value = "unknown"
-        if field == "error_tags":
+        if field in {"error_tags", "review_labels"}:
             value = list(value) if isinstance(value, list) else [str(value)] if value else []
+        if field == "screenshots":
+            value = list(value) if isinstance(value, list) else []
         out[field] = value
     return out
 
@@ -232,6 +275,112 @@ def _add_item_paths(item: dict[str, Any], review: Path) -> None:
     item["review_package_item_folder"] = str(item_dir)
 
 
+def _load_digital_twin_preview_rows(review: Path) -> dict[str, dict[str, Any]]:
+    rows: dict[str, dict[str, Any]] = {}
+    v1_path = review / "digital_twin_previews_v1" / "digital_twin_preview_manifest_v1.jsonl"
+    for row in load_jsonl(v1_path):
+        rid = row.get("review_id")
+        if not rid:
+            continue
+        safe = safe_id_for_path(str(rid))
+        rows[str(rid)] = {
+            "digital_twin_preview_version": "v1",
+            "digital_twin_preview_status": row.get("status"),
+            "digital_twin_gif": f"../digital_twin_previews_v1/items/{safe}/preview.gif" if row.get("gif_path") else None,
+            "digital_twin_mp4": f"../digital_twin_previews_v1/items/{safe}/preview.mp4" if row.get("mp4_path") else None,
+            "digital_twin_contact_sheet_large": f"../digital_twin_previews_v1/items/{safe}/contact_sheet_large.png" if row.get("contact_sheet_large_path") else None,
+            "digital_twin_primary_visual_type": row.get("primary_visual_type"),
+            "digital_twin_visual_quality": row.get("visual_quality"),
+            "digital_twin_warnings": row.get("warnings") or [],
+        }
+    manifest_path = review / "digital_twin_previews" / "digital_twin_preview_manifest.jsonl"
+    for row in load_jsonl(manifest_path):
+        rid = row.get("review_id")
+        if not rid or str(rid) in rows:
+            continue
+        safe = safe_id_for_path(str(rid))
+        rows[str(rid)] = {
+            "digital_twin_preview_version": "v0",
+            "digital_twin_preview_status": row.get("status"),
+            "digital_twin_contact_sheet": f"../digital_twin_previews/{safe}/contact_sheet.png" if row.get("status") == "rendered" else None,
+            "digital_twin_front_view": f"../digital_twin_previews/{safe}/front_view.png" if row.get("status") == "rendered" else None,
+            "digital_twin_side_view": f"../digital_twin_previews/{safe}/side_view.png" if row.get("status") == "rendered" else None,
+            "digital_twin_top_view": f"../digital_twin_previews/{safe}/top_view.png" if row.get("status") == "rendered" else None,
+            "digital_twin_warnings": row.get("warnings") or [],
+        }
+    return rows
+
+
+def _load_visual_judge_rows(review: Path) -> dict[str, dict[str, Any]]:
+    rows: dict[str, dict[str, Any]] = {}
+    for row in load_jsonl(review / "visual_judge_results.jsonl"):
+        rid = row.get("review_id")
+        if not rid:
+            continue
+        rows[str(rid)] = {
+            "visual_judge": row,
+            "visual_body_pose_guess": row.get("body_pose_guess"),
+            "visual_torso_lean_guess": row.get("torso_lean_guess"),
+            "visual_facing_guess": row.get("facing_guess"),
+            "visual_partner_visible": row.get("partner_visible"),
+            "visual_motion_visible": row.get("motion_visible"),
+            "visual_dominant_motion_guess": row.get("dominant_motion_guess"),
+            "visual_contact_support_guess": row.get("contact_support_guess"),
+            "visual_suggested_family": row.get("suggested_family"),
+            "visual_family_confidence": row.get("family_confidence"),
+            "visual_reasoning_short": row.get("reasoning_short"),
+            "visual_parse_status": row.get("parse_status"),
+            "visual_evidence_sufficient_for_family": row.get("evidence_sufficient_for_family"),
+        }
+    return rows
+
+
+def _load_multisignal_rows(review: Path) -> dict[str, dict[str, Any]]:
+    rows: dict[str, dict[str, Any]] = {}
+    for row in load_jsonl(review / "multisignal_review_priorities.jsonl"):
+        rid = row.get("review_id")
+        if not rid:
+            continue
+        rows[str(rid)] = {
+            "multisignal": row,
+            "multisignal_priority": row.get("multisignal_priority"),
+            "multisignal_reason": row.get("reason"),
+        }
+    return rows
+
+
+def _load_ontology_rows(run: Path) -> dict[str, dict[str, Any]]:
+    rows: dict[str, dict[str, Any]] = {}
+    for row in load_jsonl(run / "semantic_actions" / "pose_first_semantic_resolved_v1.jsonl"):
+        wid = row.get("window_id")
+        if not wid:
+            continue
+        rows[str(wid)] = {
+            "ontology_resolved_family": row.get("resolved_semantic_family"),
+            "ontology_resolved_motion_subtype": row.get("resolved_motion_subtype"),
+            "ontology_primary_motion_center": row.get("primary_motion_center"),
+            "ontology_target_region": row.get("target_region"),
+            "ontology_clean_motion_gate": row.get("clean_motion_gate"),
+            "ontology_conflict_flags": row.get("conflict_flags") or [],
+            "ontology_missing_requirements": row.get("missing_requirements") or [],
+            "ontology_not_labels": row.get("not_labels") or [],
+            "ontology_explanation": row.get("explanation"),
+        }
+    for row in load_jsonl(run / "datasets" / "ontology_aligned_candidates_v1.jsonl"):
+        wid = row.get("window_id")
+        if not wid:
+            continue
+        rows.setdefault(str(wid), {}).update(
+            {
+                "ontology_match": row.get("ontology_match"),
+                "ontology_conflicts": row.get("ontology_conflict") or [],
+                "ontology_generation_requirements_satisfied": row.get("generation_requirements_satisfied"),
+                "ontology_review_priority": row.get("recommended_review_priority"),
+            }
+        )
+    return rows
+
+
 def _normalize_review_item(item: dict[str, Any]) -> dict[str, Any]:
     pose = item.get("pose_semantics") if isinstance(item.get("pose_semantics"), dict) else {}
     motion = item.get("motion_semantics") if isinstance(item.get("motion_semantics"), dict) else {}
@@ -253,8 +402,8 @@ def _normalize_review_item(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _load_compact_candidates(run: Path) -> list[dict[str, Any]]:
-    cow = _load_first(run / "datasets" / "cowgirl_candidate_db_v7.jsonl", run / "datasets" / "cowgirl_candidate_db_v6.jsonl", run / "datasets" / "cowgirl_candidate_db_v5.jsonl")
-    sem = _load_first(run / "datasets" / "semantic_candidate_db_v2.jsonl", run / "datasets" / "semantic_candidate_db_v1.jsonl", run / "datasets" / "semantic_candidate_db_v0.jsonl")
+    cow = _load_first(run / "datasets" / "cowgirl_candidate_db_v8.jsonl", run / "datasets" / "cowgirl_candidate_db_v7.jsonl", run / "datasets" / "cowgirl_candidate_db_v6.jsonl", run / "datasets" / "cowgirl_candidate_db_v5.jsonl")
+    sem = _load_first(run / "datasets" / "semantic_candidate_db_v3.jsonl", run / "datasets" / "semantic_candidate_db_v2.jsonl", run / "datasets" / "semantic_candidate_db_v1.jsonl", run / "datasets" / "semantic_candidate_db_v0.jsonl")
     rows = cow or sem
     compact = []
     for row in rows:
@@ -296,6 +445,8 @@ def _hypotheses(candidates: list[dict[str, Any]], ledger: list[dict[str, Any]]) 
         _hyp("BJ/oral is preserved as own family", "BJ/oral examples should be excluded from Cowgirl but retained.", candidates, lambda r: r.get("semantic_family") == "bj_oral" or "bj_oral" in str(r.get("category")), "medium"),
         _hyp("hands_on_partner_chest is reliable", "Partner chest contact requires strong target evidence.", candidates, lambda r: "chest" in str(r.get("contact_support")) or "chest" in str(r.get("category")), "high"),
         _hyp("hands_on_partner_hips is reliable", "Partner hip contact requires disambiguation from chest/head/floor.", candidates, lambda r: "hips" in str(r.get("contact_support")) or "hips" in str(r.get("category")), "medium"),
+        _hyp("lean-back supported Cowgirl is recognized", "Frontal lean-back support should not be marked reverse or hands-free by default.", candidates, lambda r: "lean_back_supported" in str(r.get("pose_subtype")) or "lean_back" in str(r.get("category")), "high"),
+        _hyp("hands behind partner leg/thigh support is distinct", "Behind-body support should be separated from chest/hips/hands-free support.", candidates, lambda r: "hands_behind" in str(r.get("contact_support")) or "legs_or_thighs" in str(r.get("contact_support")) or "legs_or_thighs" in str(r.get("category")), "high"),
         _hyp("standing hand/head is excluded from Cowgirl", "Standing gesture candidates should stay negative for Cowgirl.", candidates, lambda r: "standing" in str(r.get("category")) or r.get("semantic_family") in {"hand_gesture", "head_gesture"}, "medium"),
         _hyp("receiver response is not active rider", "Receiver response should not be promoted to active Cowgirl.", candidates, lambda r: "receiver_response" in str(r.get("category")) or r.get("semantic_family") == "receiver_response", "medium"),
         _hyp("duplicate low-motion selection is fixed", "Review batches should avoid repeated near-duplicate holds.", candidates, lambda r: "low_motion" in str(r.get("category")), "medium"),

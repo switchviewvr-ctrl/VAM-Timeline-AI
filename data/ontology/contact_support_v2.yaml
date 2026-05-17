@@ -1,0 +1,74 @@
+schema_version: contact_support_v2
+meaning_source: semantik_master_konsolidiert_docx
+global_hand_states:
+  IK_Locked_Static:
+    description: Hand is planted on base surface, velocity zero, carrying/supporting weight.
+  IK_Locked_Dynamic:
+    description: Hand is parented/constrained to a moving target such as partner chest, pelvis, hips, or thighs.
+  FK_Soft_Floating:
+    description: Hand IK weight is reduced/zero; hand follows shoulder-relative FK with noise/stroking.
+contact_support:
+  hands_on_partner_chest:
+    hand_state: IK_Locked_Dynamic
+    target: partner.chest_or_shoulders
+    typical_families: [cowgirl, hand_touching]
+    trigger: torso_pitch_forward_gt_15deg
+  hands_on_partner_hips:
+    hand_state: IK_Locked_Dynamic
+    target: partner.hips
+    typical_families: [cowgirl, bj_oral, hand_touching]
+  hands_on_partner_pelvis_or_thighs:
+    hand_state: IK_Locked_Dynamic
+    target: partner.pelvis_or_thighs
+    typical_families: [cowgirl, bj_oral]
+    semantics: push_point_or_distance_lock
+  hands_on_partner_legs_or_thighs:
+    hand_state: IK_Locked_Dynamic
+    target: partner.legs_or_thighs
+    typical_families: [cowgirl, reverse_cowgirl, bj_oral]
+  hands_behind_support:
+    hand_state: IK_Locked_Static
+    target: behind_own_pelvis
+    typical_families: [cowgirl]
+    not_hands_free: true
+  rear_floor_drop:
+    hand_state: IK_Locked_Static
+    target: floor_or_bed_behind_body
+    typical_families: [cowgirl]
+    trigger: torso_pitch_backward_lt_minus_10deg
+  hands_on_floor_or_bed:
+    hand_state: IK_Locked_Static
+    target: floor_or_bed
+    typical_families: [doggy, cowgirl, bj_oral]
+  forearms_on_floor_or_bed:
+    hand_state: IK_Locked_Static
+    target: forearms_floor_or_bed
+    typical_families: [doggy]
+  hands_on_own_thighs:
+    hand_state: IK_Locked_Dynamic
+    target: own.thighs
+    typical_families: [doggy]
+  hands_free:
+    hand_state: FK_Soft_Floating
+    target: none
+    typical_families: [cowgirl, reverse_cowgirl, missionary]
+    must_not_hide_support: true
+  free_swinging_hands:
+    hand_state: FK_Soft_Floating
+    target: shoulder_relative
+    typical_families: [cowgirl]
+  synchronized_hand_tracking:
+    hand_state: IK_Locked_Dynamic
+    target: partner_pelvis_target_vector
+    typical_families: [bj_oral, handjob]
+  static_pinning:
+    hand_state: IK_Locked_Static
+    target: partner.hips_or_thighs
+    typical_families: [bj_oral]
+  partner_hooking:
+    hand_state: IK_Locked_Dynamic
+    target: partner.body
+    typical_families: [missionary]
+  ambiguous:
+    hand_state: unknown
+    target: unknown

@@ -4,8 +4,8 @@ This note records the current understanding of AcidBubbles Timeline JSON import/
 
 ## References Inspected
 
-- Old working exporter: `G:\VAM\Research\MocapResearch\vam_mocap_dataset_compiler\src\vam_mocap_dataset\timeline_export.py`
-- Old v283 codec: `G:\VAM\Research\MocapResearch\vam_mocap_dataset_compiler\src\vam_mocap_dataset\timeline_codec.py`
+- Old working exporter: `<VAM_TIMELINE_AI_MOCAP_COMPILER>/src/vam_mocap_dataset/timeline_export.py`
+- Old v283 codec: `<VAM_TIMELINE_AI_MOCAP_COMPILER>/src/vam_mocap_dataset/timeline_codec.py`
 - Current ported codec: `src/vam_timeline_ai/timeline/codec.py`
 - Current parser: `src/vam_timeline_ai/timeline/parser.py`
 - Handmade importable references: `data\runs\clean_v2\references\handmade_animations\raw\female_cowgirl_*.json`

@@ -1,0 +1,100 @@
+schema: component_ontology_v1
+description: Component-based schema for NLP-to-motion intent. This is not a Timeline exporter.
+
+base_states:
+  cowgirl:
+    family: cowgirl
+    actor_role: rider
+    partner_role: receiver
+    driver_region: lower_body_core
+    primary_vam_driver: hipControl
+    required_anchors: [feet, knees]
+    partner_relation: [rider_over_receiver, pelvis_aligned]
+    default_pose_subtype: cowgirl_upright
+  reverse_cowgirl:
+    family: reverse_cowgirl
+    actor_role: rider
+    partner_role: receiver
+    driver_region: lower_body_core
+    primary_vam_driver: hipControl
+    required_anchors: [feet, knees]
+    partner_relation: [rider_over_receiver, pelvis_aligned, back_to_partner]
+    default_pose_subtype: reverse_cowgirl_kneeling
+  bj_oral:
+    family: bj_oral
+    actor_role: oral_actor
+    partner_role: receiver
+    driver_region: head_neck
+    primary_vam_driver: headControl
+    static_regions: [lower_body_core, pelvis, feet]
+    default_pose_subtype: bj_kneeling_forward
+  handjob:
+    family: handjob
+    actor_role: manual_actor
+    partner_role: receiver
+    driver_region: hands
+    primary_vam_driver: lHandControl_or_rHandControl
+    static_regions: [lower_body_core, pelvis, feet]
+  doggy:
+    family: doggy
+    actor_role: receiver_or_front_actor
+    partner_role: behind_actor
+    driver_region: lower_body_core
+    partner_relation: [partner_behind]
+    required_anchors: [hands, knees, feet]
+  missionary:
+    family: missionary
+    actor_role: receiver
+    partner_role: top_or_front_actor
+    driver_region: pelvis
+    default_pose_subtype: missionary_supine
+
+actions:
+  hold:
+    mode: IK_locked_dynamic
+    effectors_default: [lHandControl, rHandControl]
+    target_required: true
+    weight: 1.0
+  support:
+    mode: support_anchor
+    effectors_default: [lHandControl, rHandControl]
+    target_required: true
+    relative_velocity: 0.0
+  stroke:
+    mode: FK_or_soft_IK_surface_motion
+    effectors_default: [lHandControl, rHandControl]
+  touch:
+    mode: contact_touch
+    effectors_default: [lHandControl, rHandControl]
+
+motion_profiles:
+  slow_soft:
+    frequency_hz: [0.4, 1.0]
+    amplitude_multiplier: 1.0
+    curve_type: smooth_sine
+    follower_lag: high
+  fast_impact:
+    frequency_hz: [2.0, 4.0]
+    amplitude_multiplier: 0.5
+    curve_type: impact_sawtooth
+    follower_lag: low
+  slow_teasing:
+    frequency_hz: [0.35, 0.9]
+    amplitude_multiplier: 0.8
+    curve_type: smooth_sine_with_variation
+    follower_lag: high
+
+pose_modifiers:
+  lean_forward:
+    cowgirl_pose_subtype: cowgirl_lean_forward_supported
+  lean_back:
+    cowgirl_pose_subtype: cowgirl_lean_back_supported
+    not_reverse: true
+  upright:
+    cowgirl_pose_subtype: cowgirl_upright
+
+safety_rules:
+  - no_person_root_world_targets
+  - no_timeline_export_from_nlp_v1
+  - unsupported_terms_become_unresolved_requirements
+  - manual_review_required_before_truth

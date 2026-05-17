@@ -5,7 +5,7 @@ The handmade animation ZIP is a calibration set, not wild-scene ground truth.
 Expected local input:
 
 ```powershell
-G:\VAM\Saves\PluginData\animations\animations.zip
+<path-to-reference-animations.zip>
 ```
 
 Repo-local convention if copied for local work:

@@ -1,0 +1,25 @@
+schema_version: pose_subtypes_v1
+pose_subtypes:
+  cowgirl_upright: {family: cowgirl, torso_lean: upright, facing_context: front_cowgirl}
+  cowgirl_kneeling: {family: cowgirl, lower_body: kneeling, facing_context: front_cowgirl}
+  cowgirl_squat: {family: cowgirl, lower_body: squat, facing_context: front_cowgirl}
+  cowgirl_lean_forward_supported: {family: cowgirl, torso_lean: forward, support_context: hands_forward_support, facing_context: front_cowgirl}
+  cowgirl_lean_back_supported: {family: cowgirl, torso_lean: backward, support_context: hands_behind_support, facing_context: front_cowgirl, not_reverse: true}
+  reverse_cowgirl_standing_squat: {family: reverse_cowgirl, facing_context: back_to_partner}
+  reverse_cowgirl_hover: {family: reverse_cowgirl, facing_context: back_to_partner}
+  reverse_cowgirl_kneeling: {family: reverse_cowgirl, facing_context: back_to_partner}
+  reverse_cowgirl_lean_forward: {family: reverse_cowgirl, facing_context: back_to_partner, torso_lean: forward}
+  reverse_cowgirl_lean_back: {family: reverse_cowgirl, facing_context: back_to_partner, torso_lean: backward}
+  doggy_all_fours: {family: doggy, support_context: hands_front_support, torso_lean: forward}
+  doggy_bent_forward: {family: doggy, support_context: front_support, torso_lean: forward}
+  doggy_elevated_support: {family: doggy, support_context: elevated_front_support, torso_lean: forward}
+  bj_kneeling: {family: bj_oral, lower_body: kneeling, torso_lean: forward}
+  bj_forward_lean: {family: bj_oral, torso_lean: forward}
+  bj_low_or_lying: {family: bj_oral, body_height: low}
+  missionary_supine: {family: missionary, body_state: supine}
+  missionary_legs_up: {family: missionary, body_state: supine, legs: up}
+  missionary_wrapped_legs: {family: missionary, body_state: supine, legs: wrapped}
+  missionary_flat_passive: {family: missionary, body_state: supine, motion: passive}
+  standing_upright: {family: standing_hand_head, lower_body: standing}
+  lying_receiver: {family: receiver_response, body_state: lying}
+  unknown: {family: unknown}

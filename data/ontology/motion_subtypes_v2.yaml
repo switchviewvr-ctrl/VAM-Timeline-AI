@@ -1,0 +1,141 @@
+schema_version: motion_subtypes_v2
+meaning_source: semantik_master_konsolidiert_docx
+subtypes:
+  cowgirl_grinding:
+    family: cowgirl
+    driver: pelvis_hip
+    axis_priority: [pelvis_pitch_roll_yaw, xz_oval_or_figure8]
+    vertical_amplitude: low_to_medium
+    rhythm: cyclic
+    followers: [chest_counter_rotation, head_stabilizing_lag]
+  cowgirl_vertical_bounce:
+    family: cowgirl
+    driver: pelvis_hip
+    axis_priority: [pelvis_y_translation, bottom_impact_deceleration, top_apex_ease]
+    vertical_amplitude: medium_to_high
+    rhythm: sinus_or_sawtooth
+    followers: [chest_head_phase_shift]
+  cowgirl_riding:
+    family: cowgirl
+    driver: pelvis_hip
+    axis_priority: [pelvis_y_translation, pelvis_z_rock, thigh_absorption]
+    rhythm: cyclic
+  cowgirl_rocking:
+    family: cowgirl
+    driver: pelvis_hip
+    axis_priority: [pelvis_z_forward_back, pelvis_pitch]
+    rhythm: semi_cyclic
+  cowgirl_corkscrew_grind:
+    family: cowgirl
+    driver: pelvis_hip
+    axis_priority: [pelvis_y_translation, pelvis_yaw_roll, x_lateral_swing]
+    rhythm: helical_or_asymmetric
+    constraints: [foot_yaw_slip_tolerance, thigh_torsion_guard]
+  cowgirl_sequential_spine_wave:
+    family: cowgirl
+    driver: pelvis_hip
+    axis_priority: [pelvis_pitch_wave, lower_spine_lag_150ms, chest_lag_300ms, head_lag_450ms]
+    rhythm: wave_cascade
+  cowgirl_lean_forward_supported:
+    family: cowgirl
+    driver: pelvis_hip
+    pose_modifier: lean_forward
+    support_context: hands_forward_support
+  cowgirl_lean_back_supported:
+    family: cowgirl
+    driver: pelvis_hip
+    pose_modifier: lean_back
+    support_context: hands_behind_support
+    not_reverse: true
+  reverse_cowgirl_grinding:
+    family: reverse_cowgirl
+    driver: pelvis_hip
+    required_facing: back_to_partner
+    axis_priority: [pelvis_xz_grind, inverted_yaw_orientation]
+  reverse_cowgirl_vertical_bounce:
+    family: reverse_cowgirl
+    driver: pelvis_hip
+    required_facing: back_to_partner
+    axis_priority: [pelvis_y_translation, inverted_yaw_orientation]
+  doggy_forward_back:
+    family: doggy
+    driver: pelvis_hip
+    axis_priority: [pelvis_z_translation, forward_impact, backward_return]
+    rhythm: asymmetric_sinus_or_sawtooth
+  doggy_planar_grind:
+    family: doggy
+    driver: pelvis_hip
+    axis_priority: [pelvis_xz_or_yz_ellipse, pelvis_roll_yaw]
+  doggy_drop_flat:
+    family: doggy
+    driver: pelvis_hip
+    pose_modifier: chest_head_low
+  doggy_arched_upright:
+    family: doggy
+    driver: pelvis_hip
+    pose_modifier: chest_y_high
+  doggy_asymmetric_pivot_thrust:
+    family: doggy
+    driver: pelvis_hip
+    axis_priority: [pelvis_z_thrust, pelvis_x_breakout, roll_or_yaw_at_impact]
+  bj_head_bob:
+    family: bj_oral
+    driver: head_neck
+    support_driver: chest_abdomen
+    axis_priority: [head_target_vector_translation, chest_synchronized_translation]
+  bj_circular_swirl:
+    family: bj_oral
+    driver: head_neck
+    axis_priority: [head_pitch_yaw_roll_small_loop]
+  bj_hand_assisted:
+    family: bj_oral
+    driver: head_neck
+    secondary_driver: hands
+    axis_priority: [head_target_vector, hands_phase_shift]
+  bj_helical_oral_thrust:
+    family: bj_oral
+    driver: head_neck
+    axis_priority: [head_z_translation, head_yaw_rotation_coupling]
+  bj_deep_alignment:
+    family: bj_oral
+    driver: head_neck
+    axis_priority: [head_chest_target_axis_lock]
+    limiter_rules: [neck_stress_limiter, head_dof_under_2_degrees_when_locked]
+  hand_repetitive_up_down:
+    family: handjob
+    driver: hands
+    target_region: partner_pelvis_or_genital_area
+  hand_forward_back:
+    family: handjob
+    driver: hands
+    target_region: partner_pelvis_or_genital_area
+  hand_circular:
+    family: handjob
+    driver: hands
+    target_region: partner_pelvis_or_genital_area
+  missionary_counter_thrust:
+    family: missionary
+    driver: pelvis_counter_driver
+    axis_priority: [reactive_y_lift, external_z_impact]
+  missionary_impact_absorption:
+    family: missionary
+    driver: external_impact_response
+    axis_priority: [chest_grounded, spine_spring_mass, head_response]
+  missionary_leg_wrapping:
+    family: missionary
+    driver: legs_dynamic_followers
+    axis_priority: [foot_partner_hook, knee_flexion_from_partner_distance]
+  missionary_legs_up:
+    family: missionary
+    driver: pelvis_counter_driver
+    axis_priority: [thigh_max_flexion, pelvis_posterior_tilt, shoulder_neck_support]
+  missionary_supine_roll_thrust:
+    family: missionary
+    driver: pelvis_counter_driver
+    axis_priority: [pelvis_roll, chest_grounded_roll_counter]
+  transition_alignment:
+    family: transition_setup
+    driver: full_body_transition
+  pose_hold:
+    family: pose_context_hold
+    driver: static_pose

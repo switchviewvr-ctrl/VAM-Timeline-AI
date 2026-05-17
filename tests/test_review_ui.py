@@ -36,7 +36,7 @@ def _make_review(tmp_path: Path):
     manifest = dict(
         row,
         source_scene_file="scene.json",
-        source_scene_path="G:\\VAM\\scene.json",
+        source_scene_path="local_scene_batch/scene.json",
         technical_atom_id="Person",
         start_seconds=1.0,
         end_seconds=5.0,

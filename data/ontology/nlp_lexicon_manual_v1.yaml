@@ -1,0 +1,255 @@
+schema: nlp_lexicon_manual_v1
+description: Manual active lexicon for anatomy, actions, poses, modifiers, and sequence terms.
+
+entries:
+  - id: anatomy_lower_body_core
+    type: anatomy
+    terms: [hip, hips, hüfte, hüften, beckenbereich]
+    maps_to:
+      semantic_region: lower_body_core
+      primary_controller: hipControl
+      note: Cowgirl/Reverse Cowgirl primary visible driver in VaM.
+    active: true
+
+  - id: anatomy_pelvis
+    type: anatomy
+    terms: [pelvis, becken]
+    maps_to:
+      semantic_region: pelvis
+      primary_controller: pelvisControl
+      not_primary_for: [cowgirl, reverse_cowgirl]
+    active: true
+
+  - id: anatomy_thighs
+    type: anatomy
+    terms: [thigh, thighs, oberschenkel]
+    maps_to:
+      semantic_region: thighs
+      controllers: [lThighControl, rThighControl]
+    active: true
+
+  - id: anatomy_head_neck
+    type: anatomy
+    terms: [head, kopf, neck, hals, nacken]
+    maps_to:
+      semantic_region: head_neck
+      primary_controller: headControl
+    active: true
+
+  - id: anatomy_hands
+    type: anatomy
+    terms: [hand, hands, hände]
+    maps_to:
+      semantic_region: hands
+      controllers: [lHandControl, rHandControl]
+    active: true
+
+  - id: anatomy_feet
+    type: anatomy
+    terms: [foot, feet, fuß, füße]
+    maps_to:
+      semantic_region: feet
+      controllers: [lFootControl, rFootControl]
+      default_role: anchor
+    active: true
+
+  - id: anatomy_knees
+    type: anatomy
+    terms: [knee, knees, knie]
+    maps_to:
+      semantic_region: knees
+      controllers: [lKneeControl, rKneeControl]
+      default_role: anchor
+    active: true
+
+  - id: action_hold
+    type: action
+    terms: [hold, grab, grip, cling, festhalten, greifen, klammern, hält, haelt]
+    maps_to:
+      action_id: hold
+      mode: IK_locked_dynamic
+      ik_position_weight: 1.0
+      ik_rotation_weight: 1.0
+      target_required: true
+    active: true
+
+  - id: action_support
+    type: action
+    terms: [support, brace, lean on, abstützen, stützen]
+    maps_to:
+      action_id: support
+      mode: support_anchor
+      relative_velocity: 0.0
+      target_required: true
+    active: true
+
+  - id: action_stroke
+    type: action
+    terms: [stroke, caress, rub, streicheln, reiben]
+    maps_to:
+      action_id: stroke
+      mode: FK_or_soft_IK_surface_motion
+    active: true
+
+  - id: action_touch
+    type: action
+    terms: [touch, touching, berühren, anfassen]
+    maps_to:
+      action_id: touch
+      mode: contact_touch
+    active: true
+
+  - id: pose_lean_forward
+    type: pose_modifier
+    terms: [lean forward, leaning forward, nach vorne lehnen, nach vorn lehnen, vorgebeugt]
+    maps_to:
+      pose_modifier: lean_forward
+      pose_subtype_hint: cowgirl_lean_forward_supported
+    active: true
+
+  - id: pose_lean_back
+    type: pose_modifier
+    terms: [lean back, leaning back, zurücklehnen, zurückgelehnt, nach hinten gelehnt]
+    maps_to:
+      pose_modifier: lean_back
+      pose_subtype_hint: cowgirl_lean_back_supported
+      not_reverse: true
+    active: true
+
+  - id: pose_upright
+    type: pose_modifier
+    terms: [upright, aufrecht, gerade aufrecht]
+    maps_to:
+      pose_modifier: upright
+      pose_subtype_hint: cowgirl_upright
+    active: true
+
+  - id: family_cowgirl
+    type: family
+    terms: [cowgirl, riding, reiten, reitet, oben reiten, auf ihm reiten]
+    maps_to:
+      family: cowgirl
+      driver_region: lower_body_core
+      primary_vam_driver: hipControl
+    active: true
+
+  - id: family_reverse_cowgirl
+    type: family
+    terms: [reverse cowgirl, rückwärts auf ihm, mit dem rücken zu ihm, facing away]
+    maps_to:
+      family: reverse_cowgirl
+      facing_context: back_to_partner
+    active: true
+
+  - id: family_doggy
+    type: family
+    terms: [doggy, doggystyle, vierfüßler, von hinten, vorgebeugt]
+    maps_to:
+      family: doggy
+    active: true
+
+  - id: family_bj_oral
+    type: family
+    terms: [bj, oral, blowjob]
+    maps_to:
+      family: bj_oral
+      driver_region: head_neck
+    active: true
+
+  - id: family_handjob
+    type: family
+    terms: [hj, handjob, manual, hand motion]
+    maps_to:
+      family: handjob
+      driver_region: hands
+    active: true
+
+  - id: family_missionary
+    type: family
+    terms: [missionary, missionar, rückenlage, beine hoch]
+    maps_to:
+      family: missionary
+    active: true
+
+  - id: modifier_slow_soft
+    type: modifier
+    terms: [slow, slowly, gentle, soft, langsam, sanft, weich, zärtlich]
+    maps_to:
+      style: slow_soft
+      frequency_hz_range: [0.4, 1.0]
+      amplitude_multiplier: 1.0
+      curve_type: smooth_sine
+      follower_lag: high
+    active: true
+
+  - id: modifier_fast_impact
+    type: modifier
+    terms: [fast, quick, hard, rough, schnell, hart, wild, kräftig]
+    maps_to:
+      style: fast_impact
+      frequency_hz_range: [2.0, 4.0]
+      amplitude_multiplier: 0.5
+      curve_type: impact_sawtooth
+      follower_lag: low
+    active: true
+
+  - id: modifier_teasing
+    type: modifier
+    terms: [teasing, tease, neckisch, spielerisch]
+    maps_to:
+      style_modifier: teasing
+      curve_type_hint: slow_variation
+    active: true
+
+  - id: modifier_asymmetrical
+    type: modifier
+    terms: [asymmetrical, asymmetric, asymmetrisch]
+    maps_to:
+      style_modifier: asymmetry
+    active: true
+
+  - id: sequence_first
+    type: sequence
+    terms: [first, zuerst, erst]
+    maps_to:
+      sequence_marker: first
+    active: true
+
+  - id: sequence_then
+    type: sequence
+    terms: [then, danach, dann]
+    maps_to:
+      sequence_marker: then
+    active: true
+
+  - id: sequence_into
+    type: sequence
+    terms: [into, transitioning into, übergehend in, zu]
+    maps_to:
+      sequence_marker: into
+      transition_type: interpolate_pose_or_style
+    active: true
+
+  - id: target_partner_shoulders
+    type: target
+    terms: [shoulders, shoulder, schultern, schulter]
+    maps_to:
+      target_node: partner.shoulders
+      target_region: partner_upper_body
+    active: true
+
+  - id: target_partner_chest
+    type: target
+    terms: [chest, brust]
+    maps_to:
+      target_node: partner.chest
+      target_region: partner_chest_region
+    active: true
+
+  - id: target_partner_thighs
+    type: target
+    terms: [thighs, legs, oberschenkel, beine]
+    maps_to:
+      target_node: partner.thighs
+      target_region: partner_leg_thigh_region
+    active: true

@@ -1,0 +1,12 @@
+schema: lexicon_sources_v1
+description: Sources for NLP lexicon construction. Manual entries are active; external entries are candidates until reviewed.
+sources:
+  - source_id: manual_project_semantics
+    type: manual
+    path: data/ontology/nlp_lexicon_manual_v1.yaml
+    active_by_default: true
+  - source_id: external_web_context_candidates
+    type: external_candidate
+    path: data/research/web_motion_context_v1/web_context_ontology_patch_candidates_v1.yaml
+    active_by_default: false
+    requires_human_review: true

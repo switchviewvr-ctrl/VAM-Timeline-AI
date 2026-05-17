@@ -1,0 +1,28 @@
+schema_version: sourcebook_trace_v2
+sourcebook:
+  title: Semantik_Master_Konsolidiert.docx
+  extracted_text: data/ontology/sourcebooks/semantik_master_konsolidiert_extracted_v1.txt
+  sha256: 27ab5774b7937db4ee4b38b3ae0cc45ad5393170ca2f63f35f482e5e9d24de4a
+trace:
+  controller_legend:
+    source_sections: [0.1, 0.2]
+    ontology_files: [motion_families_v2.yaml, pose_first_motion_rules_v2.yaml]
+    critical_mapping: Root/root-node/pelvis-root maps to pelvis/hip/abdomen controls, never VaM Person/root/world.
+  cowgirl:
+    source_sections: [1.Cowgirl, 2.Cowgirl, 3.Cowgirl, 5.Cowgirl, 6.Cowgirl, 7.Twisted_Cowgirl, 8.Sequential_Spine_Wave, 10.Hand_Routing_Cowgirl, 14.Cowgirl_Lower_Body]
+    ontology_files: [motion_families_v2.yaml, motion_subtypes_v2.yaml, pose_subtypes_v2.yaml, contact_support_v2.yaml]
+  reverse_cowgirl:
+    source_sections: [8.Spider_Reverse_Cowgirl]
+    distinction: Lean-back front Cowgirl is not reverse unless facing/back-to-partner evidence exists.
+  doggy:
+    source_sections: [1.Doggy, 2.Doggy, 3.Doggy, 5.Doggy, 6.Doggy, 7.Twisted_Doggy, 8.Upright_Doggy, 10.Hand_Routing_Doggy, 14.Doggy_Lower_Body]
+  bj_oral:
+    source_sections: [1.BJ_Oral, 2.BJ_Oral, 3.BJ_Oral, 5.BJ_Oral, 6.BJ_Oral, 7.Twisted_BJ_Oral, 10.Hand_Routing_BJ_Oral]
+  missionary:
+    source_sections: [1.Missionary, 2.Missionary, 3.Missionary, 5.Missionary, 6.Missionary, 7.Twisted_Missionary, 8.Legs_Up_Missionary, 14.Missionary_Lower_Body]
+  hand_and_arm_state_machine:
+    source_sections: [10.Hand_Arm_Kinematics]
+    ontology_files: [contact_support_v2.yaml]
+  lower_body_state_machine:
+    source_sections: [14.Lower_Body_IK_FK_Dynamics]
+    ontology_files: [motion_families_v2.yaml, pose_subtypes_v2.yaml]

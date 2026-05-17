@@ -51,6 +51,7 @@ def _pose_feature_row(index: dict[str, Any], body: dict[str, Any], anchors: dict
     has_hip = has("hip") or has("pelvis")
     technical_atom = str(index.get("technical_atom_id") or "").lower()
     scene = str(index.get("source_scene_file") or "").lower()
+    hint_text = " ".join(str(index.get(k) or "") for k in ("source_scene_file", "source_scene_path", "source_id", "sample_id", "timeline_clip", "clip_name")).lower()
     quality = str(body.get("body_motion_quality") or "")
     standing_hint = 0.5 if ("stand" in scene or "standing" in quality) else 0.0
     receiver_hint = 0.45 if ("receiver" in quality or "lying" in scene) else 0.0
@@ -75,6 +76,25 @@ def _pose_feature_row(index: dict[str, Any], body: dict[str, Any], anchors: dict
     torso_forward = 0.45 if has_chest and has_hip else 0.0
     if has_hands and has_chest:
         torso_forward += 0.15
+    lean_back_hint = any(token in hint_text for token in ("lean_back", "lean-back", "lean back", "back_supported", "nach hinten", "hinten"))
+    hands_behind_hint = any(token in hint_text for token in ("hands_behind", "behind_support", "hand_back", "hinten", "thigh", "leg_support", "oberschenkel"))
+    torso_back = 0.0
+    if has_chest and has_hip and has_hands and has_knees:
+        torso_back += 0.28
+    if lean_back_hint:
+        torso_back += 0.45
+    hands_behind = 0.0
+    if has_hands and has_hip and has_knees and not standing >= 0.55:
+        hands_behind += 0.28
+    if hands_behind_hint:
+        hands_behind += 0.45
+    hands_forward_body = hands_support
+    partner_legs = 0.35 if has_hands and has_knees and has_feet and hands_behind >= 0.35 else 0.0
+    partner_thighs = 0.35 if has_hands and (has("thigh") or (has_knees and has_hip)) and hands_behind >= 0.35 else 0.0
+    hands_behind_support = min(1.0, max(hands_behind, (hands_behind + torso_back + partner_legs + partner_thighs) / 3.0))
+    front_facing = 0.55 if has_chest and has_hip and not any(token in hint_text for token in ("reverse", "facing away", "away_facing")) else 0.2
+    reverse_facing = 0.65 if any(token in hint_text for token in ("reverse", "facing away", "away_facing")) else 0.0
+    seated_hovering = min(1.0, max(kneeling, squat, (fold + anchor_score) / 2.0))
     warnings = []
     if "invalid" in str(validity.get("controller_validity_status") or ""):
         warnings.append("Controller validity is invalid; pose feature confidence reduced.")
@@ -93,7 +113,10 @@ def _pose_feature_row(index: dict[str, Any], body: dict[str, Any], anchors: dict
         "foot_height_proxy": 0.08 if has_feet else 0.0,
         "hand_height_proxy": 0.58 if has_hands else 0.0,
         "torso_forward_lean_proxy": round(min(1.0, torso_forward), 6),
-        "torso_upright_proxy": round(max(0.0, 1.0 - torso_forward), 6),
+        "torso_lean_forward_score": round(min(1.0, torso_forward), 6),
+        "torso_lean_back_score": round(min(1.0, torso_back), 6),
+        "torso_upright_score": round(max(0.0, 1.0 - max(torso_forward, torso_back)), 6),
+        "torso_upright_proxy": round(max(0.0, 1.0 - max(torso_forward, torso_back)), 6),
         "body_flatness_proxy": round(max(lying_back, lying_prone), 6),
         "kneeling_score": round(min(1.0, kneeling), 6),
         "squat_score": round(min(1.0, squat), 6),
@@ -101,6 +124,16 @@ def _pose_feature_row(index: dict[str, Any], body: dict[str, Any], anchors: dict
         "lying_on_back_score": round(min(1.0, lying_back), 6),
         "lying_prone_score": round(min(1.0, lying_prone), 6),
         "hands_forward_support_score": round(min(1.0, hands_support), 6),
+        "hands_behind_body_score": round(min(1.0, hands_behind), 6),
+        "hands_forward_body_score": round(min(1.0, hands_forward_body), 6),
+        "hands_near_partner_legs_score": round(min(1.0, partner_legs), 6),
+        "hands_near_partner_thighs_score": round(min(1.0, partner_thighs), 6),
+        "hands_behind_support_score": round(min(1.0, hands_behind_support), 6),
+        "hands_on_partner_legs_score": round(min(1.0, partner_legs if hands_behind >= 0.45 else 0.0), 6),
+        "hands_on_partner_thighs_score": round(min(1.0, partner_thighs if hands_behind >= 0.45 else 0.0), 6),
+        "rider_front_facing_proxy": round(min(1.0, front_facing), 6),
+        "rider_reverse_facing_proxy": round(min(1.0, reverse_facing), 6),
+        "seated_or_hovering_cowgirl_score": round(min(1.0, seated_hovering), 6),
         "feet_behind_body_score": round(min(1.0, feet_behind), 6),
         "knees_under_body_score": round(min(1.0, knees_under), 6),
         "lower_body_fold_score": round(min(1.0, fold), 6),
@@ -120,6 +153,8 @@ def _write_report(rows: list[dict[str, Any]], report: str | Path) -> None:
     for row in rows:
         if _num(row.get("standing_score")) >= 0.5:
             buckets["standing_like"] += 1
+        elif _num(row.get("torso_lean_back_score")) >= 0.45 and _num(row.get("hands_behind_support_score")) >= 0.4:
+            buckets["lean_back_supported_like"] += 1
         elif _num(row.get("kneeling_score")) >= 0.45:
             buckets["kneeling_like"] += 1
         elif _num(row.get("lying_on_back_score")) >= 0.45:

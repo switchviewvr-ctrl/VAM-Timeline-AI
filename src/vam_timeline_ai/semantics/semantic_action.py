@@ -23,6 +23,8 @@ class SemanticActionCandidate:
     motion_subtype: str = "unknown"
     partner_relation: list[str] = field(default_factory=list)
     contact_support: str = "unknown"
+    facing_context: str = "unknown"
+    torso_lean_direction: str = "unknown"
     phase: str = "unknown"
     generation_safe: bool = False
     semantic_score: float = 0.0
@@ -31,6 +33,11 @@ class SemanticActionCandidate:
     interaction_score: float = 0.0
     consistency_score: float = 0.0
     conflict_flags: list[str] = field(default_factory=list)
+    support_constraint_requirements: list[str] = field(default_factory=list)
+    hands_behind_support_score: float = 0.0
+    hands_on_partner_legs_score: float = 0.0
+    hands_on_partner_thighs_score: float = 0.0
+    facing_confidence: float = 0.0
     warnings: list[str] = field(default_factory=list)
     is_human_ground_truth: bool = False
     is_training_label: bool = False
@@ -73,8 +80,11 @@ def _action_from_candidate(candidate: dict[str, Any], pose: dict[str, Any], inte
     pose_subtype = str(pose.get("pose_subtype") or "unknown")
     interaction_family = str(interaction.get("interaction_family") or "unknown")
     contact = str(interaction.get("support_context") or "unknown")
+    facing_context = str(pose.get("facing_context") or "unknown")
+    torso_lean_direction = str(pose.get("torso_lean_direction") or "unknown")
     phase = _phase_from_candidate(candidate, motion_family)
     conflicts: list[str] = []
+    requirements: list[str] = []
     semantic_family = motion_family
     if motion_family == "cowgirl":
         if pose_family in {"standing", "lying_receiver"}:
@@ -85,6 +95,13 @@ def _action_from_candidate(candidate: dict[str, Any], pose: dict[str, Any], inte
             phase = "intro"
         if contact == "hands_on_partner_chest" and not interaction.get("contact_targets"):
             conflicts.append("hands_on_partner_chest_missing_partner_target")
+        if pose_subtype == "cowgirl_lean_back_supported":
+            requirements.extend([
+                "keep_torso_lean_back",
+                "keep_rider_pelvis_aligned_to_partner",
+            ])
+            if contact in {"hands_on_partner_legs_or_thighs", "hands_behind_support", "ambiguous_behind_support"}:
+                requirements.append("keep_hands_behind_on_partner_legs_or_thighs")
     if motion_family == "bj_oral":
         semantic_family = "bj_oral"
         conflicts.append("excluded_from_cowgirl_bj_oral")
@@ -119,6 +136,8 @@ def _action_from_candidate(candidate: dict[str, Any], pose: dict[str, Any], inte
         motion_subtype=motion_subtype,
         partner_relation=interaction.get("partner_relation") or ["unknown"],
         contact_support=contact,
+        facing_context=facing_context,
+        torso_lean_direction=torso_lean_direction,
         phase=phase,
         generation_safe=generation_safe,
         semantic_score=round(semantic_score, 6),
@@ -127,6 +146,11 @@ def _action_from_candidate(candidate: dict[str, Any], pose: dict[str, Any], inte
         interaction_score=round(interaction_score, 6),
         consistency_score=round(consistency, 6),
         conflict_flags=_dedupe(conflicts),
+        support_constraint_requirements=_dedupe(requirements),
+        hands_behind_support_score=round(float(pose.get("hands_behind_support_confidence") or interaction.get("hands_behind_partner_support_score") or 0.0), 6),
+        hands_on_partner_legs_score=round(float(interaction.get("hands_on_partner_legs_score") or 0.0), 6),
+        hands_on_partner_thighs_score=round(float(interaction.get("hands_on_partner_thighs_score") or 0.0), 6),
+        facing_confidence=round(float(pose.get("facing_confidence") or 0.0), 6),
         warnings=_dedupe(warnings),
     )
 

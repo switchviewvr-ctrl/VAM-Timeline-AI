@@ -110,6 +110,107 @@ textarea { width: 100%; min-height: 78px; resize: vertical; }
   font-size: 13px;
 }
 .meta .k { color: var(--muted); }
+.meta div { min-width: 0; overflow-wrap: anywhere; }
+.quick-review {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 10px;
+  border: 1px solid #d7dce5;
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+.quick-review textarea { min-height: 110px; }
+.screenshot-drop {
+  border: 1px dashed #9aa6b8;
+  border-radius: 8px;
+  padding: 10px;
+  min-height: 74px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 13px;
+}
+.screenshot-drop:focus {
+  outline: 2px solid #8ab4f8;
+}
+.screenshot-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.screenshot-list img {
+  max-width: 120px;
+  max-height: 90px;
+  border: 1px solid #d7dce5;
+  border-radius: 6px;
+  object-fit: contain;
+  background: #f8fafc;
+}
+.save-status {
+  color: #2f6b45;
+  font-size: 12px;
+  min-height: 16px;
+}
+.system-proposal {
+  margin: 10px 0;
+  padding: 10px;
+  border-left: 3px solid #97a6ba;
+  background: #f8fafc;
+  font-size: 13px;
+}
+.system-proposal .title { color: var(--muted); font-weight: 600; margin-bottom: 4px; }
+.digital-twin-preview {
+  margin: 10px 0;
+  padding: 8px;
+  border: 1px solid #d7dce5;
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+.digital-twin-preview img {
+  display: block;
+  width: 100%;
+  max-height: 520px;
+  object-fit: contain;
+  background: #fff;
+  border: 1px solid #e5eaf2;
+  border-radius: 6px;
+}
+.digital-twin-preview video {
+  display: block;
+  width: 100%;
+  max-height: 520px;
+  background: #fff;
+  border: 1px solid #e5eaf2;
+  border-radius: 6px;
+}
+.digital-twin-preview .title {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.compact-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 10px;
+  font-size: 13px;
+  margin: 8px 0;
+}
+.compact-facts b { color: var(--muted); font-weight: 500; }
+.debug-details {
+  margin: 8px 0;
+  border: 1px solid #e5eaf2;
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: #fbfcfe;
+}
+.debug-details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.review-label {
+  font-size: 17px;
+  font-weight: 700;
+  margin: 0 0 8px;
+}
 .pillrow { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .pill {
   display: inline-flex;
@@ -210,14 +311,19 @@ pre {
 APP_JS = r"""
 const DATA = window.REVIEW_UI_DATA || {};
 const STORE_KEY = "vam_timeline_ai_review_answers_" + (DATA.review_name || "review");
-const YES_NO = ["unknown", "true", "false", "not_applicable"];
 const FAMILIES = ["", "cowgirl", "bj_oral", "doggy", "standing_hand_head", "hand_gesture", "head_gesture", "receiver_response", "transition", "unknown"];
-const VERDICTS = ["", "correct", "partially_correct", "wrong", "unclear", "unavailable"];
-const ERROR_TAGS = [
+const REVIEW_LABELS = (DATA.answer_schema && DATA.answer_schema.review_labels) || [
+  "correct_clean_cowgirl_motion", "correct_short_cowgirl_motion", "cowgirl_pose_only_low_motion",
+  "cowgirl_transition_intro_alignment", "standing_hand_head_not_cowgirl", "bj_oral_not_cowgirl",
+  "receiver_response_not_rider_motion", "wrong_partner_context", "wrong_contact_support",
+  "broken_pose_or_bad_data", "unknown_unclear"
+];
+const ERROR_TAGS = (DATA.answer_schema && DATA.answer_schema.error_tags) || [
   "low_motion_hold", "intro_alignment", "bj_oral_as_cowgirl", "standing_hand_head_as_cowgirl",
   "receiver_as_rider", "contact_wrong_target", "partner_context_missing", "duplicate_review_selection",
   "foot_anchor_weird", "pose_broken", "controller_missing", "generation_safe_false_positive"
 ];
+const REVIEW_QUESTIONS = (DATA.answer_schema && DATA.answer_schema.review_questions) || [];
 let answers = loadAnswers();
 let currentReviewFilter = "";
 
@@ -239,8 +345,14 @@ function loadAnswers() {
 }
 
 function saveAnswers() {
-  localStorage.setItem(STORE_KEY, JSON.stringify(answers));
-  updateProgress();
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(answers));
+    updateProgress();
+    return true;
+  } catch (err) {
+    alert("Browser storage is full. Export answers, then clear local answers or use fewer screenshots. New pasted screenshots are compressed, but existing large screenshots may still fill storage.");
+    return false;
+  }
 }
 
 function answerFor(id) {
@@ -260,7 +372,9 @@ function answerFor(id) {
       generation_safe_correct: "unknown",
       actual_generation_safe: "unknown",
       verdict: "",
+      review_labels: [],
       error_tags: [],
+      screenshots: [],
       notes: ""
     };
   }
@@ -269,9 +383,10 @@ function answerFor(id) {
 
 function setAnswer(id, key, value) {
   answerFor(id)[key] = value;
-  saveAnswers();
+  const ok = saveAnswers();
   const card = document.querySelector(`[data-review-card="${id}"]`);
   if (card) card.classList.toggle("reviewed", isReviewed(answerFor(id)));
+  return ok;
 }
 
 function isReviewed(a) {
@@ -314,6 +429,9 @@ function scoreBlock(item) {
     "rider_above_partner_score", "contact_support_confidence", "clean_motion_gate",
     "hip_motion_strength", "pelvis_trajectory_strength", "pelvis_cycle_count",
     "motion_duration_confidence"
+    , "torso_lean_direction", "facing_context", "hands_behind_support_score",
+    "hands_on_partner_legs_score", "hands_on_partner_thighs_score",
+    "partner_leg_support_confidence", "facing_confidence"
   ];
   return el("div", {class:"scores"}, keys.map(k => {
     const raw = item[k] ?? (item.evidence_scores || {})[k];
@@ -336,32 +454,154 @@ function reviewCard(item) {
   const id = item.review_id || item.window_id;
   const a = answerFor(id);
   const card = el("section", {class:"card" + (isReviewed(a) ? " reviewed" : ""), "data-review-card": id});
-  card.appendChild(el("h2", {text: id}));
+  card.appendChild(el("h2", {class:"review-label", text: item.review_label || item.semantic_review_label || id}));
   card.appendChild(el("div", {class:"pillrow"}, [
     el("span", {class:"pill " + familyClass(item.semantic_family), text:value(item.semantic_family)}),
     el("span", {class:"pill", text:value(item.why_selected || item.category)}),
     el("span", {class:"pill", text:"gen_safe: " + value(item.generation_safe)}),
   ]));
+  if ((item.duplicate_status && item.duplicate_status !== "unique") || item.previously_reviewed) {
+    card.appendChild(el("div", {class:"notice warn", text:item.review_trust_warning || "This item appears to overlap a previously reviewed sample/window."}));
+  }
   card.appendChild(el("div", {class:"meta"}, [
-    kv("Scene", item.source_scene_path || item.source_scene_file),
+    kv("Review ID", id),
+    kv("Scene", item.source_scene_file),
     kv("Actor", item.technical_atom_id || item.technical_actor_id),
+    kv("Clip", value(item.clip_name)),
     kv("Time", `${value(item.start_seconds)} - ${value(item.end_seconds)}s`),
     kv("Pose", `${value(item.pose_family || item.pose_semantics?.family)} / ${value(item.pose_subtype || item.pose_semantics?.subtype)}`),
+    kv("Torso / Facing", `${value(item.torso_lean_direction)} / ${value(item.facing_context)}`),
     kv("Motion", `${value(item.motion_subtype || item.motion_semantics?.subtype)} / ${value(item.phase || item.motion_semantics?.phase)}`),
     kv("Clean gate", `${value(item.clean_motion_gate)} / ${value(item.clean_motion_gate_reason)}`),
     kv("Partner", item.partner_relation),
     kv("Contact", item.contact_support),
+    kv("Support ctx", item.support_context),
+    kv("Duplicate", `${value(item.duplicate_status)} / ${value(item.duplicate_group_id)}`),
     kv("Interaction", item.interaction_family),
+    kv("Likely failure", item.likely_failure_mode),
   ]));
-  card.appendChild(scoreBlock(item));
-  if (item.warnings && item.warnings.length) card.appendChild(el("p", {class:"warn", text:"Warnings: " + item.warnings.join("; ")}));
+  card.appendChild(el("div", {class:"compact-facts"}, [
+    kvInline("Pose", `${value(item.pose_subtype || item.pose_semantics?.subtype)}`),
+    kvInline("Motion", `${value(item.motion_subtype || item.motion_semantics?.subtype)} / ${value(item.phase || item.motion_semantics?.phase)}`),
+    kvInline("Torso", `${value(item.torso_lean_direction)} / ${value(item.facing_context)}`),
+    kvInline("Support", `${value(item.contact_support)}`),
+    kvInline("Time", `${value(item.start_seconds)}-${value(item.end_seconds)}s`),
+    kvInline("Clip", value(item.clip_name)),
+  ]));
+  card.appendChild(el("div", {class:"system-proposal"}, [
+    el("div", {class:"title", text:"system guess"}),
+    el("div", {text:`${value(item.semantic_family)} / ${value(item.pose_subtype || item.pose_semantics?.subtype)} / ${value(item.motion_subtype || item.motion_semantics?.subtype)} / ${value(item.contact_support)}`}),
+    el("div", {text:`bucket: ${value(item.why_selected || item.category)}`}),
+  ]));
+  if (item.digital_twin_gif || item.digital_twin_mp4 || item.digital_twin_contact_sheet_large || item.digital_twin_contact_sheet) {
+    const media = [];
+    if (item.digital_twin_gif) {
+      media.push(el("a", {href:item.digital_twin_gif, target:"_blank"}, [
+        el("img", {src:item.digital_twin_gif, alt:`${id} animated digital twin preview`})
+      ]));
+    } else if (item.digital_twin_mp4) {
+      media.push(el("video", {controls:true, src:item.digital_twin_mp4}));
+    } else if (item.digital_twin_contact_sheet_large) {
+      media.push(el("a", {href:item.digital_twin_contact_sheet_large, target:"_blank"}, [
+        el("img", {src:item.digital_twin_contact_sheet_large, alt:`${id} large digital twin contact sheet`})
+      ]));
+    } else if (item.digital_twin_contact_sheet) {
+      media.push(el("div", {class:"notice warn", text:"Only static technical plot available; no animated digital-twin preview."}));
+      media.push(el("a", {href:item.digital_twin_contact_sheet, target:"_blank"}, [
+        el("img", {src:item.digital_twin_contact_sheet, alt:`${id} digital twin contact sheet`})
+      ]));
+    }
+    const links = [];
+    if (item.digital_twin_mp4) links.push(link(item.digital_twin_mp4, "MP4"));
+    if (item.digital_twin_gif) links.push(link(item.digital_twin_gif, "GIF"));
+    if (item.digital_twin_contact_sheet_large) links.push(link(item.digital_twin_contact_sheet_large, "large sheet"));
+    if (item.digital_twin_contact_sheet) links.push(link(item.digital_twin_contact_sheet, "static plot"));
+    card.appendChild(el("div", {class:"digital-twin-preview"}, [
+      el("div", {class:"title", text:"digital twin preview"}),
+      ...media,
+      ...(links.length ? [el("div", {class:"pillrow"}, links)] : []),
+      ...(item.digital_twin_primary_visual_type ? [el("div", {class:"pillrow"}, [
+        el("span", {class:"pill", text:"primary: " + item.digital_twin_primary_visual_type}),
+        el("span", {class:"pill", text:"quality: " + value(item.digital_twin_visual_quality)}),
+      ])] : []),
+      ...(item.digital_twin_warnings && item.digital_twin_warnings.length ? [el("div", {class:"warn", text:item.digital_twin_warnings.join("; ")})] : []),
+    ]));
+  }
+  if (item.visual_judge || item.multisignal_priority) {
+    card.appendChild(el("div", {class:"system-proposal"}, [
+      el("div", {class:"title", text:"visual judge / multisignal"}),
+      el("div", {class:"compact-facts"}, [
+        kvInline("VLM family", `${value(item.visual_suggested_family)} (${value(item.visual_family_confidence)})`),
+        kvInline("Parse", value(item.visual_parse_status)),
+        kvInline("Pose", `${value(item.visual_body_pose_guess)} / torso ${value(item.visual_torso_lean_guess)}`),
+        kvInline("Facing", value(item.visual_facing_guess)),
+        kvInline("Partner", `visible=${value(item.visual_partner_visible)}`),
+        kvInline("Motion", `${value(item.visual_motion_visible)} / ${value(item.visual_dominant_motion_guess)}`),
+        kvInline("Contact", value(item.visual_contact_support_guess)),
+        kvInline("Priority", `${value(item.multisignal_priority)} / ${value(item.multisignal_reason)}`),
+      ]),
+      ...(item.visual_reasoning_short ? [el("div", {text:"reasoning: " + item.visual_reasoning_short})] : []),
+      el("div", {class:"pillrow"}, [
+        buttonSmall("VLM correct", () => setAnswer(id, "visual_judge_verdict", "correct")),
+        buttonSmall("VLM wrong", () => setAnswer(id, "visual_judge_verdict", "wrong")),
+        buttonSmall("VLM unsure", () => setAnswer(id, "visual_judge_verdict", "unsure")),
+      ]),
+    ]));
+  }
+  if (item.ontology_resolved_family || item.ontology_match) {
+    card.appendChild(el("div", {class:"system-proposal"}, [
+      el("div", {class:"title", text:"ontology / pose-first semantics"}),
+      el("div", {class:"compact-facts"}, [
+        kvInline("Ontology family", value(item.ontology_resolved_family)),
+        kvInline("Motion", value(item.ontology_resolved_motion_subtype)),
+        kvInline("Primary driver", value(item.ontology_primary_motion_center)),
+        kvInline("Target", value(item.ontology_target_region)),
+        kvInline("Clean gate", value(item.ontology_clean_motion_gate)),
+        kvInline("Match", value(item.ontology_match)),
+        kvInline("Review priority", value(item.ontology_review_priority)),
+      ]),
+      ...(item.ontology_conflict_flags && item.ontology_conflict_flags.length ? [el("div", {class:"warn", text:"conflicts: " + item.ontology_conflict_flags.join("; ")})] : []),
+      ...(item.ontology_conflicts && item.ontology_conflicts.length ? [el("div", {class:"warn", text:"alignment conflicts: " + item.ontology_conflicts.join("; ")})] : []),
+      ...(item.ontology_missing_requirements && item.ontology_missing_requirements.length ? [el("div", {class:"warn", text:"missing: " + item.ontology_missing_requirements.join("; ")})] : []),
+      ...(item.ontology_not_labels && item.ontology_not_labels.length ? [el("div", {class:"pillrow"}, item.ontology_not_labels.map(x => el("span", {class:"pill", text:"not: " + x})))] : []),
+      ...(item.ontology_explanation ? [el("div", {text:item.ontology_explanation})] : []),
+    ]));
+  }
+  card.appendChild(quickAnswerForm(id, a));
+  const details = el("details", {class:"debug-details"}, [
+    el("summary", {text:"source/debug details"}),
+    el("div", {class:"meta"}, [
+      kv("Scene", item.source_scene_file),
+      kv("Actor", item.technical_atom_id || item.technical_actor_id),
+      kv("Partner", item.partner_relation),
+      kv("Clean gate", `${value(item.clean_motion_gate)} / ${value(item.clean_motion_gate_reason)}`),
+      kv("Likely failure", item.likely_failure_mode),
+      kv("Duplicate status", `${value(item.duplicate_status)} / overlaps: ${value(item.overlaps_with_review_ids)}`),
+      kv("Full scene path", item.source_scene_path || item.source_scene_file),
+      kv("Source ID", item.source_id),
+      kv("Timeline / clip", `${value(item.storable_id || item.plugin_id)} / ${value(item.clip_name)} #${value(item.clip_index)}`),
+      kv("Window", item.window_id),
+    ])
+  ]);
+  card.appendChild(details);
+  const evidence = el("details", {class:"debug-details"}, [
+    el("summary", {text:"evidence scores"}),
+    ...(item.motion_metrics ? [el("pre", {text:"Motion metrics\n" + JSON.stringify(item.motion_metrics, null, 2)})] : []),
+    scoreBlock(item),
+    ...(item.warnings && item.warnings.length ? [el("p", {class:"warn", text:"Warnings: " + item.warnings.join("; ")})] : []),
+  ]);
+  card.appendChild(evidence);
   const links = [];
   if (item.item_review_path) links.push(link(item.item_review_path, "item instructions"));
   if (item.timeline_export_path) links.push(link(item.timeline_export_path, "timeline segment"));
+  if (item.vam_animation_path) links.push(link(item.vam_animation_path, "VaM animations copy"));
   if (item.source_scene_path) links.push(el("span", {class:"pill", text:item.source_scene_path}));
   if (links.length) card.appendChild(el("div", {class:"pillrow"}, links));
-  card.appendChild(answerForm(id, a));
   return card;
+}
+
+function kvInline(k, v) {
+  return el("div", {}, [el("b", {text:k + ": "}), value(v)]);
 }
 
 function kv(k, v) {
@@ -370,6 +610,12 @@ function kv(k, v) {
 
 function link(href, text) {
   return el("a", {class:"button-link", href:href, target:"_blank", text:text});
+}
+
+function buttonSmall(text, onClick) {
+  const b = el("button", {type:"button", text:text});
+  b.addEventListener("click", onClick);
+  return b;
 }
 
 function selectField(id, key, options) {
@@ -389,43 +635,98 @@ function inputField(id, key, placeholder="") {
   return input;
 }
 
-function answerForm(id, a) {
+function quickAnswerForm(id, a) {
   const wrap = el("div", {class:"answer"});
-  const rows = [
-    ["semantic_family_correct", selectField(id, "semantic_family_correct", YES_NO)],
-    ["actual_semantic_family", selectField(id, "actual_semantic_family", FAMILIES)],
-    ["pose_correct", selectField(id, "pose_correct", YES_NO)],
-    ["actual_pose", inputField(id, "actual_pose", "e.g. cowgirl_lean_forward_supported")],
-    ["motion_correct", selectField(id, "motion_correct", YES_NO)],
-    ["actual_motion", inputField(id, "actual_motion", "e.g. clean grinding / intro alignment")],
-    ["partner_relation_correct", selectField(id, "partner_relation_correct", YES_NO)],
-    ["actual_partner_relation", inputField(id, "actual_partner_relation", "e.g. rider over receiver")],
-    ["contact_support_correct", selectField(id, "contact_support_correct", YES_NO)],
-    ["actual_contact_support", inputField(id, "actual_contact_support", "e.g. hands_on_partner_chest")],
-    ["generation_safe_correct", selectField(id, "generation_safe_correct", YES_NO)],
-    ["actual_generation_safe", selectField(id, "actual_generation_safe", YES_NO)],
-    ["verdict", selectField(id, "verdict", VERDICTS)],
-  ];
-  for (const [label, field] of rows) wrap.appendChild(el("div", {class:"answer-row"}, [el("label", {text:label}), field]));
-  const tags = el("div", {class:"tags"});
-  for (const tag of ERROR_TAGS) {
-    const cb = el("input", {type:"checkbox"});
-    cb.checked = (a.error_tags || []).includes(tag);
-    cb.addEventListener("change", () => {
-      const cur = new Set(answerFor(id).error_tags || []);
-      cb.checked ? cur.add(tag) : cur.delete(tag);
-      setAnswer(id, "error_tags", Array.from(cur));
-    });
-    tags.appendChild(el("label", {}, [cb, " " + tag]));
-  }
-  wrap.appendChild(el("label", {text:"error tags"}));
-  wrap.appendChild(tags);
-  const notes = el("textarea", {placeholder:"notes"});
+  wrap.className = "quick-review";
+  const notes = el("textarea", {placeholder:"Schreib einfach rein, was du siehst. Beispiel: 'Pose ist normal cowgirl, Animation ist auch normal cowgirl.'"});
   notes.value = a.notes || "";
   notes.addEventListener("input", () => setAnswer(id, "notes", notes.value));
-  wrap.appendChild(el("label", {text:"notes"}));
   wrap.appendChild(notes);
+  wrap.appendChild(screenshotBox(id));
+  const status = el("div", {class:"save-status", text:""});
+  const save = el("button", {type:"button", text:"Save answer"});
+  save.addEventListener("click", () => {
+    saveAnswers();
+    status.textContent = "saved locally";
+    setTimeout(() => { status.textContent = ""; }, 1600);
+  });
+  wrap.appendChild(el("div", {class:"pillrow"}, [save, status]));
   return wrap;
+}
+
+function screenshotBox(id) {
+  const box = el("div", {class:"screenshot-drop", tabindex:"0", text:"Screenshot hier anklicken und mit Ctrl+V einfuegen. Bilder werden verkleinert gespeichert."});
+  const list = el("div", {class:"screenshot-list"});
+  const render = () => {
+    list.innerHTML = "";
+    const shots = answerFor(id).screenshots || [];
+    shots.forEach((shot, idx) => {
+      const img = el("img", {src:shot.data_url || shot, alt:`screenshot ${idx + 1}`});
+      const remove = el("button", {type:"button", text:"remove"});
+      remove.addEventListener("click", () => {
+        const cur = answerFor(id).screenshots || [];
+        cur.splice(idx, 1);
+        setAnswer(id, "screenshots", cur);
+        render();
+      });
+      list.appendChild(el("div", {}, [img, remove]));
+    });
+  };
+  box.addEventListener("paste", async (event) => {
+    const items = Array.from(event.clipboardData?.items || []);
+    for (const item of items) {
+      if (!item.type.startsWith("image/")) continue;
+      const file = item.getAsFile();
+      if (!file) continue;
+      const cur = answerFor(id).screenshots || [];
+      const previous = cur.slice();
+      const dataUrl = await readCompressedImageAsDataURL(file);
+      cur.push({
+        name:`screenshot_${cur.length + 1}.jpg`,
+        mime:"image/jpeg",
+        original_mime:file.type,
+        compressed:true,
+        data_url:dataUrl,
+        captured_at:new Date().toISOString()
+      });
+      answerFor(id).screenshots = cur;
+      if (!saveAnswers()) {
+        answerFor(id).screenshots = previous;
+        saveAnswers();
+        box.textContent = "Speicher voll. Answers exportieren oder alte Screenshots entfernen.";
+        return;
+      }
+      const kb = Math.round(dataUrl.length * 0.75 / 1024);
+      box.textContent = `Screenshot gespeichert (~${kb} KB). Weitere mit Ctrl+V einfuegen.`;
+      render();
+      event.preventDefault();
+    }
+  });
+  render();
+  return el("div", {}, [box, list]);
+}
+
+function readCompressedImageAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 900;
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.72));
+      };
+      img.onerror = reject;
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 function updateProgress() {
@@ -551,7 +852,7 @@ function exportYaml() {
 function codexPrompt() {
   const rows = Object.values(answers).filter(isReviewed);
   const lines = ["We reviewed " + (DATA.review_name || "the review") + ". Findings:"];
-  for (const r of rows) lines.push(`${r.review_id}: verdict=${r.verdict || "unknown"} family=${r.actual_semantic_family || "unknown"} pose=${r.actual_pose || ""} motion=${r.actual_motion || ""} contact=${r.actual_contact_support || ""} errors=${(r.error_tags||[]).join(", ")} notes=${r.notes || ""}`);
+  for (const r of rows) lines.push(`${r.review_id}: verdict=${r.verdict || "unknown"} labels=${(r.review_labels||[]).join(", ")} family=${r.actual_semantic_family || "unknown"} pose=${r.actual_pose || ""} motion=${r.actual_motion || ""} contact=${r.actual_contact_support || ""} errors=${(r.error_tags||[]).join(", ")} notes=${r.notes || ""}`);
   lines.push("Common errors: " + Array.from(new Set(rows.flatMap(r => r.error_tags || []))).join(", "));
   lines.push("Next needed fixes: calibrate the recurring errors above; do not treat these audit answers as manual_labels.yaml.");
   document.getElementById("codex-prompt").value = lines.join("\n");

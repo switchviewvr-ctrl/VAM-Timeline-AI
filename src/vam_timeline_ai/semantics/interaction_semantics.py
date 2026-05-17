@@ -21,6 +21,16 @@ class InteractionSemanticRecord:
     contact_targets: dict[str, Any] = field(default_factory=dict)
     support_context: str = "unknown"
     interaction_confidence: float = 0.0
+    contact_support_confidence: float = 0.0
+    contact_support_margin: float = 0.0
+    contact_support_ambiguous: bool = False
+    best_contact_target: str = "unknown"
+    second_best_contact_target: str = "unknown"
+    partner_context_confidence: float = 0.0
+    hands_on_partner_legs_score: float = 0.0
+    hands_on_partner_thighs_score: float = 0.0
+    hands_behind_partner_support_score: float = 0.0
+    partner_leg_thigh_approximation_used: bool = False
     warnings: list[str] = field(default_factory=list)
     is_human_ground_truth: bool = False
     is_training_label: bool = False

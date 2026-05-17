@@ -1,0 +1,22 @@
+schema_version: pose_first_motion_rules_v1
+rules:
+  cowgirl_clean_requires:
+    pose_family: cowgirl
+    primary_motion_center_any: [pelvis_hip, thighs]
+    partner_relation_any: [rider_over_receiver, pelvis_aligned]
+    forbidden_primary_motion_centers: [head_neck, hands]
+  bj_oral_requires:
+    primary_motion_center_any: [head_neck, chest_abdomen]
+    target_region_any: [partner_pelvis_or_genital_area]
+    pelvis_role: not_primary_driver
+  handjob_requires:
+    primary_motion_center_any: [hands, left_hand, right_hand, both_hands]
+    target_region_any: [partner_pelvis_or_genital_area]
+  doggy_requires:
+    pose_subtype_any: [doggy_all_fours, doggy_bent_forward, doggy_elevated_support]
+    partner_relation_any: [partner_behind, behind_receiver]
+  reverse_cowgirl_requires:
+    partner_relation_any: [back_to_partner, facing_away_from_partner]
+  missionary_requires:
+    pose_subtype_any: [missionary_supine, missionary_legs_up, missionary_wrapped_legs, missionary_flat_passive, lying_on_back]
+  no_person_root_world_tracks: true

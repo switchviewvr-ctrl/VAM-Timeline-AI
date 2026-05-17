@@ -101,6 +101,7 @@ def _primitive_from_candidate_v1(candidate: dict[str, Any], relative: dict[str, 
         "cowgirl_kneeling",
         "cowgirl_squat",
         "cowgirl_lean_forward_supported",
+        "cowgirl_lean_back_supported",
     ]
     relation = candidate.get("partner_relation") or interaction.get("partner_relation") or ["partner_context_optional"]
     primitive.required_partner_relation = ["rider_over_receiver"] if "rider_above_partner" in relation else ["partner_context_optional"]
@@ -109,7 +110,8 @@ def _primitive_from_candidate_v1(candidate: dict[str, Any], relative: dict[str, 
     primitive.contact_support_requirements = {
         "support_mode": contact,
         "hands_on_partner_chest_requires_partner_chest_target": contact == "hands_on_partner_chest",
-        "allowed_support_modes": ["hands_free", "hands_on_partner_chest", "hands_on_floor_or_bed", "unknown"],
+        "hands_on_partner_legs_or_thighs_requires_partner_lower_body_target": contact == "hands_on_partner_legs_or_thighs",
+        "allowed_support_modes": ["hands_free", "hands_on_partner_chest", "hands_on_partner_legs_or_thighs", "hands_behind_support", "hands_on_floor_or_bed", "unknown"],
     }
     primitive.anchor_profile = {
         "profile": "knees_feet_required_hands_optional",
@@ -122,6 +124,11 @@ def _primitive_from_candidate_v1(candidate: dict[str, Any], relative: dict[str, 
         "contact_support": contact,
     }
     primitive.interaction_frame = "partner_chest_target" if contact == "hands_on_partner_chest" else "partner_pelvis_local"
+    if primitive.required_pose_subtype == "cowgirl_lean_back_supported":
+        primitive.interaction_frame = "partner_pelvis_local"
+        primitive.torso_requirement = "lean_back"
+        primitive.contact_support_requirements["torso_requirement"] = "lean_back"
+        primitive.contact_support_requirements["preferred_support_modes"] = ["hands_on_partner_legs_or_thighs", "hands_behind_support"]
     primitive.safety_requirements.update({
         "pose_semantics_required": True,
         "partner_relation_checked": bool(interaction),

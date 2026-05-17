@@ -1,0 +1,111 @@
+schema: rig_anatomy_v1
+description: >
+  VaM-specific anatomy map for semantic motion analysis. This file defines
+  semantic body regions and their controller mappings. It is ontology/config,
+  not training data and not an animation target list.
+
+regions:
+  lower_body_core:
+    human_terms:
+      en: [hip, hips, lower body core, pelvis region]
+      de: [hüfte, hüften, beckenbereich]
+    primary_vam_controllers: [hipControl]
+    secondary_vam_controllers: [pelvisControl, abdomenControl, abdomen2Control]
+    related_vam_controllers: [lThighControl, rThighControl]
+    semantic_note: >
+      Primary visible motion driver for Cowgirl and Reverse Cowgirl in VaM.
+      Do not map this to Person/root/world transforms.
+
+  pelvis:
+    human_terms:
+      en: [pelvis]
+      de: [becken]
+    primary_vam_controllers: [pelvisControl]
+    secondary_vam_controllers: [hipControl]
+    related_vam_controllers: [abdomenControl, abdomen2Control]
+    semantic_note: >
+      Support/follower/static depending on family. PelvisControl is not the
+      sole Cowgirl primary driver in VaM.
+
+  thighs:
+    human_terms:
+      en: [thigh, thighs, upper legs]
+      de: [oberschenkel]
+    primary_vam_controllers: [lThighControl, rThighControl]
+    secondary_vam_controllers: []
+    related_vam_controllers: [hipControl, lKneeControl, rKneeControl]
+    semantic_note: Abduction, spread, support, and optional conservative motion amplifier.
+
+  knees:
+    human_terms:
+      en: [knee, knees]
+      de: [knie]
+    primary_vam_controllers: [lKneeControl, rKneeControl]
+    secondary_vam_controllers: []
+    related_vam_controllers: [lThighControl, rThighControl, lFootControl, rFootControl]
+    semantic_note: Anchor, support, phase absorber, rarely primary driver.
+
+  feet:
+    human_terms:
+      en: [foot, feet]
+      de: [fuß, füße]
+    primary_vam_controllers: [lFootControl, rFootControl]
+    secondary_vam_controllers: [lToeControl, rToeControl]
+    related_vam_controllers: [lKneeControl, rKneeControl]
+    semantic_note: Planted anchor and mostly static in Cowgirl, BJ, HJ, and Doggy unless explicitly moving.
+
+  upper_body_core:
+    human_terms:
+      en: [abdomen, chest, torso, upper body core]
+      de: [bauch, brust, oberkörper, torso]
+    primary_vam_controllers: [abdomenControl, abdomen2Control, chestControl]
+    secondary_vam_controllers: []
+    related_vam_controllers: [hipControl, pelvisControl, headControl]
+    semantic_note: Follower/damper in Cowgirl; mechanical support driver in BJ/oral.
+
+  head_neck:
+    human_terms:
+      en: [head, neck]
+      de: [kopf, hals, nacken]
+    primary_vam_controllers: [headControl, neckControl]
+    secondary_vam_controllers: []
+    related_vam_controllers: [chestControl]
+    semantic_note: Cowgirl follower/stabilizer; BJ/oral primary driver.
+
+  hands:
+    human_terms:
+      en: [hand, hands]
+      de: [hand, hände]
+    primary_vam_controllers: [lHandControl, rHandControl]
+    secondary_vam_controllers: []
+    related_vam_controllers: [lElbowControl, rElbowControl, lShoulderControl, rShoulderControl]
+    semantic_note: Support, gesture, contact, or handjob/manual driver depending on target and context.
+
+  arms:
+    human_terms:
+      en: [arm, arms, elbow, shoulder]
+      de: [arm, arme, ellbogen, schulter]
+    primary_vam_controllers: [lElbowControl, rElbowControl, lShoulderControl, rShoulderControl]
+    secondary_vam_controllers: [lHandControl, rHandControl]
+    related_vam_controllers: [chestControl]
+    semantic_note: Support chain and hand-driver mechanics.
+
+partner_targets:
+  partner_pelvis_region:
+    controllers: [partner.hipControl, partner.pelvisControl]
+    semantic_note: Neutral partner pelvis/contact target region.
+  partner_chest_region:
+    controllers: [partner.chestControl]
+    semantic_note: Partner chest/support target.
+  partner_head_region:
+    controllers: [partner.headControl]
+    semantic_note: Partner head reference target.
+  partner_leg_thigh_region:
+    controllers: [partner.lThighControl, partner.rThighControl, partner.lKneeControl, partner.rKneeControl]
+    semantic_note: Partner leg/thigh support target region.
+
+safety:
+  forbidden_animation_targets: [Person/root, world, scene_root]
+  root_term_interpretation: >
+    In animation literature, root/pelvis root maps to pelvis/hip/abdomen
+    region controllers, never VaM Person atom root/world transforms.

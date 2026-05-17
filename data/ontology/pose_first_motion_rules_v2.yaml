@@ -1,0 +1,93 @@
+schema_version: pose_first_motion_rules_v2
+meaning_source: semantik_master_konsolidiert_docx
+root_mapping:
+  rule: sourcebook_root_means_pelvis_hip_body_controls_not_VaM_person_root
+accepted_manual_gt_reference:
+  package: data/runs/clean_v3/generation/manual_gt_timeline_examples_v4
+  status: accepted_baseline_reference
+  implications:
+    - semantic pelvis_hip resolves to VaM hipControl as primary visible generation driver
+    - pelvisControl alone is insufficient for Cowgirl/Reverse Cowgirl generation
+    - static anchors must stay static in position and rotation
+    - BJ/HJ require hipControl and pelvisControl static
+resolver_order:
+  - broken_or_unknown_controller_state
+  - explicit_standing_lockout_or_gesture
+  - explicit_reverse_orientation
+  - pose_family_and_partner_relation
+  - primary_motion_center
+  - target_region_or_contact_support
+  - motion_shape_and_axis_priority
+  - exclusion_rules
+clean_motion_gates:
+  pass:
+    description: Ontology pose, role, partner relation, primary driver, and motion curve are compatible.
+  soft_pass_short:
+    description: Primary driver exists but window is short or duration confidence is weak.
+  fail_no_driver:
+    description: No meaningful semantic driver was detected.
+  fail_low_motion:
+    description: Pose context or hold; micro-noise only.
+  fail_wrong_pose:
+    description: Motion center may exist but pose family is incompatible.
+  fail_wrong_driver:
+    description: Driver belongs to another family, e.g. head for BJ or hands for handjob.
+  fail_missing_partner_context:
+    description: Family needs partner relation or target context that is missing.
+  fail_world_or_person_root:
+    description: Source relies on VaM Person/root/world transform instead of body controllers.
+rules:
+  - id: cowgirl_requires_pelvis_driver
+    if: pose_family=cowgirl
+    require_primary_motion_center: [pelvis_hip, thighs]
+    otherwise: not_clean_cowgirl
+    generation_target_expectation:
+      pelvis_hip_primary_vam_controller: hipControl
+      pelvisControl_role: light_follower_or_static
+      forbidden: [pelvisControl_as_sole_primary_driver]
+  - id: cowgirl_pose_no_motion_is_hold
+    if: pose_family=cowgirl AND primary_motion_center=static_pose
+    resolve_family: pose_context_hold
+    gate: fail_low_motion
+  - id: cowgirl_head_driver_is_bj
+    if: pose_family=cowgirl AND primary_motion_center=head_neck
+    resolve_family: bj_oral
+    gate: fail_wrong_driver
+  - id: cowgirl_hand_driver_is_handjob_or_touching
+    if: pose_family=cowgirl AND primary_motion_center=hands
+    resolve_family: handjob
+    gate: fail_wrong_driver
+  - id: lean_back_not_reverse
+    if: pose_subtype=cowgirl_lean_back_supported
+    require_for_reverse: [back_to_partner, facing_away_from_partner]
+  - id: reverse_requires_facing_away
+    if: family=reverse_cowgirl
+    require_partner_relation: [back_to_partner]
+  - id: doggy_not_from_kneeling_alone
+    if: pose_subtype=kneeling_general
+    forbid_family_without: {family: doggy, evidence: [all_fours, bent_forward, partner_behind]}
+  - id: bj_requires_head_chest_target
+    if: family=bj_oral
+    require_primary_motion_center: [head_neck, chest_abdomen]
+    require_target_region: [partner_pelvis_or_genital_area, partner_hips, partner_thighs]
+    generation_target_expectation:
+      static_controllers: [hipControl, pelvisControl, lFootControl, rFootControl]
+  - id: handjob_requires_hand_target
+    if: family=handjob
+    require_primary_motion_center: [left_hand, right_hand, both_hands, hands]
+    require_target_region: [partner_pelvis_or_genital_area, partner_hips]
+    generation_target_expectation:
+      static_controllers: [hipControl, pelvisControl, lFootControl, rFootControl]
+  - id: missionary_requires_supine
+    if: family=missionary
+    require_pose_subtype: [missionary_supine, missionary_legs_up, missionary_wrapped_legs, missionary_flat_passive, maximal_supine_flexion, lying_on_back]
+  - id: standing_lockout_excludes_cowgirl
+    if: pose_family=standing OR pose_subtype=standing_upright
+    forbid_family: [cowgirl, doggy, bj_oral]
+  - id: no_person_root_world_targets
+    forbid_generation_targets: [Person/root, world, scene_transform]
+  - id: timeline_review_export_sparse_keys
+    if: export_kind=manual_gt_review_timeline
+    require_keyframe_rate_default: 1fps
+    require_tracks: [position, rotation_quaternion]
+    forbid_dense_export_without_explicit_override: true

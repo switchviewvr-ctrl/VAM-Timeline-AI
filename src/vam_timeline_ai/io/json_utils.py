@@ -23,8 +23,10 @@ def dump_json(path: str | Path, data: Any) -> None:
 
 def load_jsonl(path: str | Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    if str(path) == "":
+        return rows
     p = Path(path)
-    if not p.exists():
+    if not p.exists() or p.is_dir():
         return rows
     with p.open("r", encoding="utf-8-sig") as f:
         for line in f:

@@ -28,6 +28,12 @@ IGNORED_SCAN_DIR_NAMES = {
 }
 
 
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="vam_timeline_ai", description="Semantic VaM Timeline motion analysis tools.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -115,11 +121,479 @@ def build_parser() -> argparse.ArgumentParser:
     static_review_ui.add_argument("--review-dir", required=True)
     static_review_ui.add_argument("--out-dir", required=True)
 
+    digital_twin_previews = subparsers.add_parser("render-digital-twin-review-previews-v0", help="Render audit-only skeleton/contact-sheet previews for a semantic review batch.")
+    digital_twin_previews.add_argument("--run-dir", required=True)
+    digital_twin_previews.add_argument("--review-dir", required=True)
+    digital_twin_previews.add_argument("--out-dir", required=True)
+
+    digital_twin_previews_v1 = subparsers.add_parser("render-digital-twin-previews-v1", help="Render animated audit-only digital-twin GIF/MP4/contact-sheet previews.")
+    digital_twin_previews_v1.add_argument("--run-dir", required=True)
+    digital_twin_previews_v1.add_argument("--review-dir", required=True)
+    digital_twin_previews_v1.add_argument("--out-dir", required=True)
+    digital_twin_previews_v1.add_argument("--fps", type=int, default=12)
+    digital_twin_previews_v1.add_argument("--width", type=int, default=960)
+    digital_twin_previews_v1.add_argument("--height", type=int, default=720)
+    digital_twin_previews_v1.add_argument("--frames", type=int, default=32)
+    digital_twin_previews_v1.add_argument("--make-gif", default="true")
+    digital_twin_previews_v1.add_argument("--make-mp4", default="auto")
+    digital_twin_previews_v1.add_argument("--view", default="side", choices=["side", "front", "top", "three_quarter"])
+
+    visual_judge_requests = subparsers.add_parser("build-visual-judge-requests-v0", help="Build local visual-judge request manifests from digital-twin previews.")
+    visual_judge_requests.add_argument("--review-dir", required=True)
+    visual_judge_requests.add_argument("--preview-dir", required=True)
+    visual_judge_requests.add_argument("--out-jsonl", required=True)
+    visual_judge_requests.add_argument("--mode", default="blind")
+
+    capture_requests = subparsers.add_parser("build-vam-capture-requests-v0", help="Build manual VaM viewport capture request manifest.")
+    capture_requests.add_argument("--review-dir", required=True)
+    capture_requests.add_argument("--out-jsonl", required=True)
+    capture_requests.add_argument("--output-root", required=True)
+    capture_requests.add_argument("--frame-count", type=int, default=16)
+    capture_requests.add_argument("--duration-seconds", type=float, default=4.0)
+
+    reality_capture = subparsers.add_parser("run-vam-reality-capture-v0", help="Call optional local VaM BepInEx capture bridge.")
+    reality_capture.add_argument("--requests", required=True)
+    reality_capture.add_argument("--bridge-url", required=True)
+    reality_capture.add_argument("--mode", default="status_only", choices=["status_only", "manual_step", "batch_current"])
+    reality_capture.add_argument("--out", required=True)
+
+    capture_sheets = subparsers.add_parser("build-vam-capture-contact-sheets-v0", help="Build contact sheets from real VaM capture frames.")
+    capture_sheets.add_argument("--capture-results", required=True)
+    capture_sheets.add_argument("--out-dir", required=True)
+
+    manual_pose_import = subparsers.add_parser("import-manual-pose-captures-v1", help="Import VaM SkeletonPoseCaptureTool JSON snapshots.")
+    manual_pose_import.add_argument("--input-dir", required=True)
+    manual_pose_import.add_argument("--out-jsonl", required=True)
+    manual_pose_import.add_argument("--report", required=True)
+
+    manual_pose_report = subparsers.add_parser("report-manual-pose-captures-v1", help="Summarize imported manual pose captures.")
+    manual_pose_report.add_argument("--captures", required=True)
+    manual_pose_report.add_argument("--out", required=True)
+
+    manual_pose_extract = subparsers.add_parser("extract-manual-pose-captures-v1", help="Extract manual VaM pose capture ZIP into an ignored run folder.")
+    manual_pose_extract.add_argument("--zip", required=True)
+    manual_pose_extract.add_argument("--out-dir", required=True)
+
+    manual_pose_explanations = subparsers.add_parser("parse-manual-pose-explanations-v1", help="Parse human explanation notes for manual pose captures.")
+    manual_pose_explanations.add_argument("--explanations", required=True)
+    manual_pose_explanations.add_argument("--out-json", required=True)
+    manual_pose_explanations.add_argument("--out-yaml", required=True)
+    manual_pose_explanations.add_argument("--report", required=True)
+
+    manual_pose_gt = subparsers.add_parser("build-manual-pose-ground-truth-v1", help="Merge manual pose captures, screenshots, and human labels.")
+    manual_pose_gt.add_argument("--capture-dir", required=True)
+    manual_pose_gt.add_argument("--human-labels", required=True)
+    manual_pose_gt.add_argument("--out-jsonl", required=True)
+    manual_pose_gt.add_argument("--out-csv", required=True)
+    manual_pose_gt.add_argument("--report", required=True)
+
+    manual_pose_gt_report = subparsers.add_parser("report-manual-pose-ground-truth-v1", help="Write family-specific manual pose ground-truth reports.")
+    manual_pose_gt_report.add_argument("--ground-truth", required=True)
+    manual_pose_gt_report.add_argument("--out-dir", required=True)
+
+    manual_pose_gt_gallery = subparsers.add_parser("build-manual-pose-ground-truth-gallery-v1", help="Build HTML gallery for manual pose ground-truth captures.")
+    manual_pose_gt_gallery.add_argument("--ground-truth", required=True)
+    manual_pose_gt_gallery.add_argument("--out-html", required=True)
+
+    visual_judge_requests_v1 = subparsers.add_parser("build-visual-judge-requests-v1", help="Build local visual judge requests preferring real VaM captures.")
+    visual_judge_requests_v1.add_argument("--review-dir", required=True)
+    visual_judge_requests_v1.add_argument("--vam-capture-sheets", required=True)
+    visual_judge_requests_v1.add_argument("--digital-twin-previews", required=True)
+    visual_judge_requests_v1.add_argument("--out-jsonl", required=True)
+    visual_judge_requests_v1.add_argument("--mode", default="blind")
+
+    lmstudio_judge = subparsers.add_parser("run-lmstudio-vlm-judge-v0", help="Run or dry-run local LM Studio VLM judge.")
+    lmstudio_judge.add_argument("--requests", required=True)
+    lmstudio_judge.add_argument("--base-url", required=True)
+    lmstudio_judge.add_argument("--model", default="nsfwvision-v4-qwen3.5-9b")
+    lmstudio_judge.add_argument("--out-jsonl", required=True)
+    lmstudio_judge.add_argument("--out-raw-dir", required=True)
+    lmstudio_judge.add_argument("--dry-run", default="true")
+
+    visual_calibration = subparsers.add_parser("build-visual-judge-calibration-set-v1", help="Build a local visual judge calibration set.")
+    visual_calibration.add_argument("--run-dir", required=True)
+    visual_calibration.add_argument("--out-dir", required=True)
+
+    visual_trust = subparsers.add_parser("evaluate-vlm-visual-judge-v1", help="Evaluate VLM visual judge calibration and write trust gate.")
+    visual_trust.add_argument("--calibration-set", required=True)
+    visual_trust.add_argument("--base-url", required=True)
+    visual_trust.add_argument("--model", default="nsfwvision-v4-qwen3.5-9b")
+    visual_trust.add_argument("--out-dir", required=True)
+    visual_trust.add_argument("--dry-run", default="true")
+
+    multisignal = subparsers.add_parser("build-multisignal-review-priorities-v0", help="Combine heuristic, ML, and VLM signals into review priorities.")
+    multisignal.add_argument("--run-dir", required=True)
+    multisignal.add_argument("--review-dir", required=True)
+    multisignal.add_argument("--model-scores", required=True)
+    multisignal.add_argument("--visual-results", required=True)
+    multisignal.add_argument("--out-jsonl", required=True)
+    multisignal.add_argument("--report", required=True)
+
+    translate_intent = subparsers.add_parser("translate-motion-intent-v1", help="Translate prompt into top-down motion intent plan.")
+    translate_intent.add_argument("--prompt", required=True)
+    translate_intent.add_argument("--ontology", required=True)
+    translate_intent.add_argument("--phrases", required=True)
+    translate_intent.add_argument("--out", required=True)
+
+    sourcebook = subparsers.add_parser("ingest-semantik-sourcebook-v2", help="Extract and register the Semantik master DOCX as ontology sourcebook.")
+    sourcebook.add_argument("--source-docx", required=True)
+    sourcebook.add_argument("--out-dir", required=True)
+    sourcebook.add_argument("--report", required=True)
+
+    stickman_library = subparsers.add_parser("build-semantic-stickman-pose-library-v1", help="Build schematic semantic stickman pose library from ontology.")
+    stickman_library.add_argument("--ontology", required=True)
+    stickman_library.add_argument("--out-json", required=True)
+    stickman_library.add_argument("--report", required=True)
+
+    stickman_examples = subparsers.add_parser("build-semantic-motion-examples-v1", help="Build semantic stickman motion examples from pose library.")
+    stickman_examples.add_argument("--pose-library", required=True)
+    stickman_examples.add_argument("--ontology", required=True)
+    stickman_examples.add_argument("--out-json", required=True)
+    stickman_examples.add_argument("--report", required=True)
+
+    stickman_render = subparsers.add_parser("render-semantic-stickman-previews-v1", help="Render semantic stickman GIF/contact sheet previews.")
+    stickman_render.add_argument("--motion-examples", required=True)
+    stickman_render.add_argument("--out-dir", required=True)
+    stickman_render.add_argument("--width", type=int, default=1280)
+    stickman_render.add_argument("--height", type=int, default=720)
+    stickman_render.add_argument("--fps", type=int, default=12)
+    stickman_render.add_argument("--make-gif", default="true")
+    stickman_render.add_argument("--make-contact-sheet", default="true")
+
+    stickman_validate = subparsers.add_parser("validate-semantic-stickman-examples-v1", help="Validate semantic stickman examples against ontology grammar.")
+    stickman_validate.add_argument("--motion-examples", required=True)
+    stickman_validate.add_argument("--ontology", required=True)
+    stickman_validate.add_argument("--out", required=True)
+
+    stickman_gallery = subparsers.add_parser("build-semantic-stickman-gallery-v1", help="Build semantic stickman HTML/Markdown gallery.")
+    stickman_gallery.add_argument("--preview-dir", required=True)
+    stickman_gallery.add_argument("--out-html", required=True)
+    stickman_gallery.add_argument("--out-md", required=True)
+
+    stickman_render_v2 = subparsers.add_parser("render-semantic-stickman-previews-v2", help="Render semantic stickman previews with labels, partner targets, alignment, and support context.")
+    stickman_render_v2.add_argument("--motion-examples", required=True)
+    stickman_render_v2.add_argument("--out-dir", required=True)
+    stickman_render_v2.add_argument("--width", type=int, default=1600)
+    stickman_render_v2.add_argument("--height", type=int, default=900)
+    stickman_render_v2.add_argument("--fps", type=int, default=12)
+    stickman_render_v2.add_argument("--make-gif", default="true")
+    stickman_render_v2.add_argument("--make-contact-sheet", default="true")
+    stickman_render_v2.add_argument("--show-labels", default="true")
+    stickman_render_v2.add_argument("--show-partner", default="true")
+    stickman_render_v2.add_argument("--show-alignment", default="true")
+    stickman_render_v2.add_argument("--show-support-targets", default="true")
+
+    stickman_validate_v2 = subparsers.add_parser("validate-semantic-stickman-examples-v2", help="Validate semantic stickman v2 previews for partner/alignment/support context.")
+    stickman_validate_v2.add_argument("--motion-examples", required=True)
+    stickman_validate_v2.add_argument("--preview-dir", required=True)
+    stickman_validate_v2.add_argument("--ontology", required=True)
+    stickman_validate_v2.add_argument("--out", required=True)
+
+    stickman_gallery_v2 = subparsers.add_parser("build-semantic-stickman-gallery-v2", help="Build semantic stickman v2 HTML/Markdown gallery with legends and warnings.")
+    stickman_gallery_v2.add_argument("--preview-dir", required=True)
+    stickman_gallery_v2.add_argument("--out-html", required=True)
+    stickman_gallery_v2.add_argument("--out-md", required=True)
+
+    stickman_examples_v2 = subparsers.add_parser("build-semantic-motion-examples-v2-contact-aware", help="Build contact-aware semantic motion examples around partner interaction targets.")
+    stickman_examples_v2.add_argument("--pose-library", required=True)
+    stickman_examples_v2.add_argument("--ontology", required=True)
+    stickman_examples_v2.add_argument("--out-json", required=True)
+    stickman_examples_v2.add_argument("--report", required=True)
+
+    stickman_render_v3 = subparsers.add_parser("render-semantic-stickman-previews-v3", help="Render contact-aware semantic stickman previews with validity overlays.")
+    stickman_render_v3.add_argument("--motion-examples", required=True)
+    stickman_render_v3.add_argument("--out-dir", required=True)
+    stickman_render_v3.add_argument("--width", type=int, default=1600)
+    stickman_render_v3.add_argument("--height", type=int, default=900)
+    stickman_render_v3.add_argument("--fps", type=int, default=12)
+    stickman_render_v3.add_argument("--make-gif", default="true")
+    stickman_render_v3.add_argument("--make-contact-sheet", default="true")
+    stickman_render_v3.add_argument("--show-labels", default="true")
+    stickman_render_v3.add_argument("--show-partner", default="true")
+    stickman_render_v3.add_argument("--show-alignment", default="true")
+    stickman_render_v3.add_argument("--show-support-targets", default="true")
+    stickman_render_v3.add_argument("--show-contact-zone", default="true")
+    stickman_render_v3.add_argument("--show-alignment-tolerance", default="true")
+    stickman_render_v3.add_argument("--show-validity-overlay", default="true")
+    stickman_render_v3.add_argument("--contact-aware", default="true")
+
+    stickman_validate_v3 = subparsers.add_parser("validate-semantic-stickman-examples-v3", help="Validate contact-aware semantic stickman previews.")
+    stickman_validate_v3.add_argument("--motion-examples", required=True)
+    stickman_validate_v3.add_argument("--preview-dir", required=True)
+    stickman_validate_v3.add_argument("--ontology", required=True)
+    stickman_validate_v3.add_argument("--out", required=True)
+
+    stickman_gallery_v3 = subparsers.add_parser("build-semantic-stickman-gallery-v3", help="Build semantic stickman v3 HTML/Markdown gallery with contact-validity summaries.")
+    stickman_gallery_v3.add_argument("--preview-dir", required=True)
+    stickman_gallery_v3.add_argument("--out-html", required=True)
+    stickman_gallery_v3.add_argument("--out-md", required=True)
+
+    vam_semantic_preview = subparsers.add_parser("export-vam-semantic-preview-v0", help="Export review-only native Timeline clips from contact-aware semantic motion examples.")
+    vam_semantic_preview.add_argument("--motion-examples", required=True)
+    vam_semantic_preview.add_argument("--out-dir", required=True)
+    vam_semantic_preview.add_argument("--duration", type=float, default=4.0)
+    vam_semantic_preview.add_argument("--fps", type=int, default=60)
+
+    vam_semantic_preview_validate = subparsers.add_parser("validate-vam-semantic-preview-v0", help="Validate review-only VaM semantic preview package.")
+    vam_semantic_preview_validate.add_argument("--preview-dir", required=True)
+    vam_semantic_preview_validate.add_argument("--out", required=True)
+
+    manual_gt_timeline = subparsers.add_parser("export-manual-gt-timeline-examples-v1", help="Export review-only Timeline examples from real manual pose ground truth.")
+    manual_gt_timeline.add_argument("--ground-truth", required=True)
+    manual_gt_timeline.add_argument("--out-dir", required=True)
+    manual_gt_timeline.add_argument("--duration", type=float, default=4.0)
+    manual_gt_timeline.add_argument("--fps", type=int, default=60)
+    manual_gt_timeline.add_argument("--copy-to-vam", default="false")
+
+    manual_gt_timeline_validate = subparsers.add_parser("validate-manual-gt-timeline-examples-v1", help="Validate manual-ground-truth Timeline examples.")
+    manual_gt_timeline_validate.add_argument("--preview-dir", required=True)
+    manual_gt_timeline_validate.add_argument("--out", required=True)
+
+    manual_gt_timeline_v2 = subparsers.add_parser("export-manual-gt-timeline-examples-v2", help="Export sparse review-only Timeline examples with captured rotations.")
+    manual_gt_timeline_v2.add_argument("--ground-truth", required=True)
+    manual_gt_timeline_v2.add_argument("--out-dir", required=True)
+    manual_gt_timeline_v2.add_argument("--duration", type=float, default=4.0)
+    manual_gt_timeline_v2.add_argument("--keyframe-rate", type=float, default=2.0)
+    manual_gt_timeline_v2.add_argument("--copy-to-vam", default="false")
+    manual_gt_timeline_v2.add_argument("--include-rotations", default="true")
+    manual_gt_timeline_v2.add_argument("--allow-dense-export", default="false")
+
+    manual_gt_timeline_validate_v2 = subparsers.add_parser("validate-manual-gt-timeline-examples-v2", help="Validate sparse manual-ground-truth Timeline examples with rotations.")
+    manual_gt_timeline_validate_v2.add_argument("--preview-dir", required=True)
+    manual_gt_timeline_validate_v2.add_argument("--out", required=True)
+    manual_gt_timeline_validate_v2.add_argument("--allow-dense-export", default="false")
+
+    manual_gt_timeline_v3 = subparsers.add_parser("export-manual-gt-timeline-examples-v3", help="Export sparse manual GT Timeline examples with hipControl primary mapping.")
+    manual_gt_timeline_v3.add_argument("--ground-truth", required=True)
+    manual_gt_timeline_v3.add_argument("--out-dir", required=True)
+    manual_gt_timeline_v3.add_argument("--duration", type=float, default=4.0)
+    manual_gt_timeline_v3.add_argument("--keyframe-rate", type=float, default=1.0)
+    manual_gt_timeline_v3.add_argument("--copy-to-vam", default="false")
+    manual_gt_timeline_v3.add_argument("--include-rotations", default="true")
+    manual_gt_timeline_v3.add_argument("--require-hip-control", default="true")
+    manual_gt_timeline_v3.add_argument("--allow-high-key-density", default="false")
+    manual_gt_timeline_v3.add_argument("--allow-dense-export", default="false")
+
+    manual_gt_timeline_validate_v3 = subparsers.add_parser("validate-manual-gt-timeline-examples-v3", help="Validate manual GT Timeline examples with hipControl v3 mapping.")
+    manual_gt_timeline_validate_v3.add_argument("--preview-dir", required=True)
+    manual_gt_timeline_validate_v3.add_argument("--out", required=True)
+    manual_gt_timeline_validate_v3.add_argument("--allow-high-key-density", default="false")
+    manual_gt_timeline_validate_v3.add_argument("--allow-dense-export", default="false")
+
+    manual_gt_timeline_v4 = subparsers.add_parser("export-manual-gt-timeline-examples-v4", help="Export manual GT Timeline examples with v4 amplitude profiles.")
+    manual_gt_timeline_v4.add_argument("--ground-truth", required=True)
+    manual_gt_timeline_v4.add_argument("--out-dir", required=True)
+    manual_gt_timeline_v4.add_argument("--duration", type=float, default=4.0)
+    manual_gt_timeline_v4.add_argument("--keyframe-rate", type=float, default=1.0)
+    manual_gt_timeline_v4.add_argument("--copy-to-vam", default="false")
+    manual_gt_timeline_v4.add_argument("--include-rotations", default="true")
+    manual_gt_timeline_v4.add_argument("--require-hip-control", default="true")
+    manual_gt_timeline_v4.add_argument("--amplitude-profile", required=True)
+    manual_gt_timeline_v4.add_argument("--allow-high-key-density", default="false")
+    manual_gt_timeline_v4.add_argument("--allow-dense-export", default="false")
+
+    manual_gt_timeline_validate_v4 = subparsers.add_parser("validate-manual-gt-timeline-examples-v4", help="Validate manual GT Timeline examples with v4 amplitude profiles.")
+    manual_gt_timeline_validate_v4.add_argument("--preview-dir", required=True)
+    manual_gt_timeline_validate_v4.add_argument("--out", required=True)
+    manual_gt_timeline_validate_v4.add_argument("--allow-high-key-density", default="false")
+    manual_gt_timeline_validate_v4.add_argument("--allow-dense-export", default="false")
+
+    pose_first = subparsers.add_parser("resolve-pose-first-semantics-v1", help="Resolve candidates with top-down pose-first motion ontology rules.")
+    pose_first.add_argument("--run-dir", required=True)
+    pose_first.add_argument("--pose-semantics", required=True)
+    pose_first.add_argument("--relative-features", required=True)
+    pose_first.add_argument("--interaction-semantics", required=True)
+    pose_first.add_argument("--candidate-db", required=True)
+    pose_first.add_argument("--rules", required=True)
+    pose_first.add_argument("--out-jsonl", required=True)
+    pose_first.add_argument("--report", required=True)
+
+    ontology_align = subparsers.add_parser("align-candidates-to-motion-ontology-v1", help="Align candidate DBs with top-down motion ontology.")
+    ontology_align.add_argument("--run-dir", required=True)
+    ontology_align.add_argument("--ontology", required=True)
+    ontology_align.add_argument("--semantic-db", required=True)
+    ontology_align.add_argument("--cowgirl-db", required=True)
+    ontology_align.add_argument("--resolved", required=True)
+    ontology_align.add_argument("--out-jsonl", required=True)
+    ontology_align.add_argument("--report", required=True)
+
+    parameter_calibration = subparsers.add_parser("calibrate-motion-parameters-v1", help="Calibrate numeric motion parameter ranges from ontology-consistent human-reviewed candidates.")
+    parameter_calibration.add_argument("--run-dir", required=True)
+    parameter_calibration.add_argument("--ontology", required=True)
+    parameter_calibration.add_argument("--resolved", required=True)
+    parameter_calibration.add_argument("--relative-features", required=True)
+    parameter_calibration.add_argument("--trajectory-features", required=True)
+    parameter_calibration.add_argument("--human-ledger", required=True)
+    parameter_calibration.add_argument("--out-json", required=True)
+    parameter_calibration.add_argument("--report", required=True)
+
     ingest_review_ui = subparsers.add_parser("ingest-review-ui-answers", help="Ingest audit-only answers exported from the local review UI.")
     ingest_review_ui.add_argument("--answers", required=True)
     ingest_review_ui.add_argument("--review-dir", required=True)
     ingest_review_ui.add_argument("--out-ledger", required=True)
     ingest_review_ui.add_argument("--report", required=True)
+    ingest_review_ui.add_argument("--overwrite", default="false")
+
+    human_ml_labels = subparsers.add_parser("build-human-reviewed-ml-labels-v1", help="Build Cowgirl ML labels from human review artifacts only.")
+    human_ml_labels.add_argument("--run-dir", required=True)
+    human_ml_labels.add_argument("--human-ledger", required=True)
+    human_ml_labels.add_argument("--out-jsonl", required=True)
+    human_ml_labels.add_argument("--report", required=True)
+
+    cowgirl_ml_features = subparsers.add_parser("build-cowgirl-ml-feature-table-v1", help="Build supervised Cowgirl ML feature table from human-reviewed labels.")
+    cowgirl_ml_features.add_argument("--run-dir", required=True)
+    cowgirl_ml_features.add_argument("--labels", required=True)
+    cowgirl_ml_features.add_argument("--relative-features", required=True)
+    cowgirl_ml_features.add_argument("--trajectory-features", required=True)
+    cowgirl_ml_features.add_argument("--pose-features", required=True)
+    cowgirl_ml_features.add_argument("--pose-semantics", required=True)
+    cowgirl_ml_features.add_argument("--partner-relative-features", required=True)
+    cowgirl_ml_features.add_argument("--interaction-semantics", required=True)
+    cowgirl_ml_features.add_argument("--semantic-actions", required=True)
+    cowgirl_ml_features.add_argument("--candidate-db", required=True)
+    cowgirl_ml_features.add_argument("--out-npz", required=True)
+    cowgirl_ml_features.add_argument("--out-meta", required=True)
+    cowgirl_ml_features.add_argument("--report", required=True)
+
+    cowgirl_ml_split = subparsers.add_parser("split-cowgirl-ml-dataset-v1", help="Create grouped leakage-safe Cowgirl ML splits.")
+    cowgirl_ml_split.add_argument("--feature-table", required=True)
+    cowgirl_ml_split.add_argument("--metadata", required=True)
+    cowgirl_ml_split.add_argument("--out-dir", required=True)
+    cowgirl_ml_split.add_argument("--group-by", default="source_scene_file")
+    cowgirl_ml_split.add_argument("--seed", type=int, default=42)
+
+    cowgirl_ml_train = subparsers.add_parser("train-cowgirl-ml-baseline-v1", help="Train small Cowgirl review-assist baseline models.")
+    cowgirl_ml_train.add_argument("--feature-table", required=True)
+    cowgirl_ml_train.add_argument("--metadata", required=True)
+    cowgirl_ml_train.add_argument("--splits", required=True)
+    cowgirl_ml_train.add_argument("--out-dir", required=True)
+
+    cowgirl_ml_score = subparsers.add_parser("score-clean-v3-with-cowgirl-model-v1", help="Score clean_v3 candidates with Cowgirl review-assist model.")
+    cowgirl_ml_score.add_argument("--run-dir", required=True)
+    cowgirl_ml_score.add_argument("--model-dir", required=True)
+    cowgirl_ml_score.add_argument("--feature-source", default="all_candidates")
+    cowgirl_ml_score.add_argument("--out-jsonl", required=True)
+    cowgirl_ml_score.add_argument("--report", required=True)
+
+    cowgirl_ml_review = subparsers.add_parser("export-ml-assisted-cowgirl-review-v1", help="Export strict novelty ML-assisted Cowgirl review batch.")
+    cowgirl_ml_review.add_argument("--run-dir", required=True)
+    cowgirl_ml_review.add_argument("--model-scores", required=True)
+    cowgirl_ml_review.add_argument("--reviewed-index", required=True)
+    cowgirl_ml_review.add_argument("--out-dir", required=True)
+    cowgirl_ml_review.add_argument("--count", type=int, default=20)
+    cowgirl_ml_review.add_argument("--max-per-scene", type=int, default=2)
+    cowgirl_ml_review.add_argument("--max-per-sample", type=int, default=1)
+    cowgirl_ml_review.add_argument("--build-vam-package", default="true")
+    cowgirl_ml_review.add_argument("--build-static-ui", default="true")
+
+    cowgirl_ml_labels_v2 = subparsers.add_parser("build-cowgirl-ml-labels-v2", help="Build Cowgirl ML v2 labels from human review and manual GT only.")
+    cowgirl_ml_labels_v2.add_argument("--base-run", required=True)
+    cowgirl_ml_labels_v2.add_argument("--new-run", required=True)
+    cowgirl_ml_labels_v2.add_argument("--human-ledger", required=True)
+    cowgirl_ml_labels_v2.add_argument("--manual-gt", required=True)
+    cowgirl_ml_labels_v2.add_argument("--out-jsonl", required=True)
+    cowgirl_ml_labels_v2.add_argument("--report", required=True)
+
+    cowgirl_ml_labels_v3 = subparsers.add_parser("build-cowgirl-ml-labels-v3", help="Build Cowgirl ML v3 item-level labels from human review.")
+    cowgirl_ml_labels_v3.add_argument("--new-run", required=True)
+    cowgirl_ml_labels_v3.add_argument("--out-jsonl", required=True)
+    cowgirl_ml_labels_v3.add_argument("--report", required=True)
+
+    cowgirl_ml_features_v2 = subparsers.add_parser("build-cowgirl-ml-feature-table-v2", help="Build Cowgirl ML v2 feature table with cycle/gate/controller features.")
+    cowgirl_ml_features_v2.add_argument("--labels", required=True)
+    cowgirl_ml_features_v2.add_argument("--pose-resolved", required=True)
+    cowgirl_ml_features_v2.add_argument("--cycle-features", required=True)
+    cowgirl_ml_features_v2.add_argument("--motion-resolved", required=True)
+    cowgirl_ml_features_v2.add_argument("--candidates", required=True)
+    cowgirl_ml_features_v2.add_argument("--manual-gt", required=True)
+    cowgirl_ml_features_v2.add_argument("--out-npz", required=True)
+    cowgirl_ml_features_v2.add_argument("--out-meta", required=True)
+    cowgirl_ml_features_v2.add_argument("--report", required=True)
+
+    cowgirl_ml_train_v2 = subparsers.add_parser("train-cowgirl-ml-v2", help="Train Cowgirl ML v2 review-ranker models.")
+    cowgirl_ml_train_v2.add_argument("--feature-table", required=True)
+    cowgirl_ml_train_v2.add_argument("--metadata", required=True)
+    cowgirl_ml_train_v2.add_argument("--out-dir", required=True)
+
+    cowgirl_ml_score_v2 = subparsers.add_parser("score-new-scenes-cowgirl-ml-v2", help="Score new scenes with Cowgirl ML v2 review-ranker.")
+    cowgirl_ml_score_v2.add_argument("--model-dir", required=True)
+    cowgirl_ml_score_v2.add_argument("--feature-table", required=True)
+    cowgirl_ml_score_v2.add_argument("--metadata", required=True)
+    cowgirl_ml_score_v2.add_argument("--out-jsonl", required=True)
+    cowgirl_ml_score_v2.add_argument("--report", required=True)
+
+    cowgirl_ml_review_v2 = subparsers.add_parser("export-ml-assisted-cowgirl-review-v2", help="Export ML-assisted Cowgirl review v2 batch.")
+    cowgirl_ml_review_v2.add_argument("--new-run", required=True)
+    cowgirl_ml_review_v2.add_argument("--scores", required=True)
+    cowgirl_ml_review_v2.add_argument("--candidates", required=True)
+    cowgirl_ml_review_v2.add_argument("--out-dir", required=True)
+    cowgirl_ml_review_v2.add_argument("--count", type=int, default=30)
+    cowgirl_ml_review_v2.add_argument("--build-static-ui", default="true")
+    cowgirl_ml_review_v2.add_argument("--build-vam-package", default="true")
+
+    relational_features_v1 = subparsers.add_parser("extract-relational-semantic-features-v1", help="Extract actor/partner contact, target, alignment, and axis features.")
+    relational_features_v1.add_argument("--run-dir", required=True)
+    relational_features_v1.add_argument("--pair-windows", required=True)
+    relational_features_v1.add_argument("--pair-features", required=True)
+    relational_features_v1.add_argument("--sample-index", required=True)
+    relational_features_v1.add_argument("--controller-map", required=True)
+    relational_features_v1.add_argument("--out-jsonl", required=True)
+    relational_features_v1.add_argument("--report", required=True)
+
+    rig_anatomy_features = subparsers.add_parser("extract-rig-anatomy-features-v1", help="Map controller cycle features into semantic rig-anatomy region features.")
+    rig_anatomy_features.add_argument("--run-dir", required=True)
+    rig_anatomy_features.add_argument("--anatomy", required=True)
+    rig_anatomy_features.add_argument("--roles", required=True)
+    rig_anatomy_features.add_argument("--out-jsonl", required=True)
+    rig_anatomy_features.add_argument("--report", required=True)
+
+    nlp_lexicon = subparsers.add_parser("build-nlp-lexicon-v1", help="Build active manual NLP lexicon plus inactive external candidates.")
+    nlp_lexicon.add_argument("--manual", required=True)
+    nlp_lexicon.add_argument("--sources", required=True)
+    nlp_lexicon.add_argument("--out", required=True)
+    nlp_lexicon.add_argument("--report", required=True)
+    nlp_lexicon.add_argument("--allow-web", default="false")
+
+    nlp_tokens = subparsers.add_parser("resolve-nlp-tokens-v1", help="Resolve prompt terms into semantic/anatomy/action/style tokens.")
+    nlp_tokens.add_argument("--prompt", required=True)
+    nlp_tokens.add_argument("--lexicon", required=True)
+    nlp_tokens.add_argument("--component-ontology", required=True)
+    nlp_tokens.add_argument("--out", required=True)
+
+    nlp_intent = subparsers.add_parser("build-motion-intent-from-prompt-v1", help="Build component MotionIntentPlan from prompt without Timeline export.")
+    nlp_intent.add_argument("--prompt", required=True)
+    nlp_intent.add_argument("--lexicon", required=True)
+    nlp_intent.add_argument("--component-ontology", required=True)
+    nlp_intent.add_argument("--out", required=True)
+
+    web_context = subparsers.add_parser("collect-web-motion-context-v1", help="Collect conservative web-context research cards.")
+    web_context.add_argument("--topics", required=True)
+    web_context.add_argument("--out-dir", required=True)
+    web_context.add_argument("--allow-web", default="false")
+    web_context.add_argument("--max-sources-per-category", type=int, default=10)
+
+    web_patches = subparsers.add_parser("build-web-context-ontology-patches-v1", help="Build inactive ontology patch candidates from web context cards.")
+    web_patches.add_argument("--research-dir", required=True)
+    web_patches.add_argument("--current-ontology", required=True)
+    web_patches.add_argument("--current-anatomy", required=True)
+    web_patches.add_argument("--out-yaml", required=True)
+    web_patches.add_argument("--report", required=True)
+
+    research_client = subparsers.add_parser("build-research-client-v0", help="Build read-only local research client skeleton.")
+    research_client.add_argument("--run-dir", required=True)
+    research_client.add_argument("--new-run", required=True)
+    research_client.add_argument("--out-dir", required=True)
+
+    eval_ml_review = subparsers.add_parser("evaluate-ml-assisted-review-v1", help="Evaluate ML-assisted review v1 against human answers.")
+    eval_ml_review.add_argument("--review-dir", required=True)
+    eval_ml_review.add_argument("--model-scores", required=True)
+    eval_ml_review.add_argument("--answers", required=True)
+    eval_ml_review.add_argument("--out", required=True)
+
+    active_learning = subparsers.add_parser("run-cowgirl-ml-active-learning-v2", help="Run Cowgirl ML active-learning loop after v1 answers exist.")
+    active_learning.add_argument("--run-dir", required=True)
+    active_learning.add_argument("--review-dir", required=True)
+    active_learning.add_argument("--out-dir", required=True)
 
     clean = subparsers.add_parser("prepare-clean-run", help="Create clean run folders and a run manifest.")
     clean.add_argument("--data-root", required=True)
@@ -750,6 +1224,132 @@ def build_parser() -> argparse.ArgumentParser:
     calibration_v16.add_argument("--run-dir", required=True)
     calibration_v16.add_argument("--previous-review", required=True)
     calibration_v16.add_argument("--out-review", required=True)
+
+    pose_support_rescan = subparsers.add_parser("run-clean-v3-pose-support-rescan", help="Add frontal Cowgirl lean-back supported pose/contact support as a focused clean_v3 audit layer.")
+    pose_support_rescan.add_argument("--run-dir", required=True)
+    pose_support_rescan.add_argument("--out-suffix", default="lean_back_support_v1")
+
+    new_scene_delta = subparsers.add_parser("compare-new-scenes-to-clean-v3", help="Compare a separate new-scene delta run against clean_v3.")
+    new_scene_delta.add_argument("--base-run", required=True)
+    new_scene_delta.add_argument("--new-run", required=True)
+    new_scene_delta.add_argument("--out", required=True)
+
+    new_scene_import = subparsers.add_parser("run-new-scenes-delta-import", help="Scan, bake, analyze, and review only a new VaM scene folder as a separate delta run.")
+    new_scene_import.add_argument("--raw-dir", required=True)
+    new_scene_import.add_argument("--base-run", required=True)
+    new_scene_import.add_argument("--out-run", required=True)
+
+    focused_new_scene_review = subparsers.add_parser("build-focused-new-scenes-review", help="Build a balanced calibration review batch from the clean_v3 new-scene delta run.")
+    focused_new_scene_review.add_argument("--run-dir", required=True)
+    focused_new_scene_review.add_argument("--previous-review", required=True)
+    focused_new_scene_review.add_argument("--out-dir", required=True)
+
+    strict_new_scene_cowgirl_review = subparsers.add_parser("build-strict-new-scenes-cowgirl-review", help="Build a stricter Cowgirl-only review batch after noisy broad new-scene review.")
+    strict_new_scene_cowgirl_review.add_argument("--run-dir", required=True)
+    strict_new_scene_cowgirl_review.add_argument("--out-dir", required=True)
+    strict_new_scene_cowgirl_review.add_argument("--previous-review", default=None)
+    strict_new_scene_cowgirl_review.add_argument("--human-answers", default=None)
+    strict_new_scene_cowgirl_review.add_argument("--batch-size", type=int, default=None)
+    strict_new_scene_cowgirl_review.add_argument("--batch-index", type=int, default=1)
+
+    new_scenes_pose_first_v2 = subparsers.add_parser("resolve-new-scenes-pose-first-semantics-v2", help="Rescan clean_v3_new_scenes with ontology v2 and manual-GT pose-first rules.")
+    new_scenes_pose_first_v2.add_argument("--new-run", required=True)
+    new_scenes_pose_first_v2.add_argument("--base-run", required=True)
+    new_scenes_pose_first_v2.add_argument("--ontology", required=True)
+    new_scenes_pose_first_v2.add_argument("--rules", required=True)
+    new_scenes_pose_first_v2.add_argument("--manual-gt", required=True)
+    new_scenes_pose_first_v2.add_argument("--out-jsonl", required=True)
+    new_scenes_pose_first_v2.add_argument("--report", required=True)
+
+    new_scenes_candidate_db_v2 = subparsers.add_parser("build-new-scenes-ontology-candidate-db-v2", help="Build ontology-aligned v2 candidate DB for clean_v3_new_scenes.")
+    new_scenes_candidate_db_v2.add_argument("--new-run", required=True)
+    new_scenes_candidate_db_v2.add_argument("--resolved", required=True)
+    new_scenes_candidate_db_v2.add_argument("--ontology", required=True)
+    new_scenes_candidate_db_v2.add_argument("--manual-gt", required=True)
+    new_scenes_candidate_db_v2.add_argument("--out-jsonl", required=True)
+    new_scenes_candidate_db_v2.add_argument("--out-csv", required=True)
+    new_scenes_candidate_db_v2.add_argument("--report", required=True)
+
+    new_scenes_family_reports_v2 = subparsers.add_parser("write-new-scenes-family-reports-v2", help="Write family-specific reports for new-scenes semantic rescan v2.")
+    new_scenes_family_reports_v2.add_argument("--new-run", required=True)
+    new_scenes_family_reports_v2.add_argument("--candidates", required=True)
+    new_scenes_family_reports_v2.add_argument("--out-dir", required=True)
+
+    new_scenes_review_v2 = subparsers.add_parser("export-new-scenes-semantic-review-v2", help="Export a strict ontology-v2 review batch from new scenes.")
+    new_scenes_review_v2.add_argument("--new-run", required=True)
+    new_scenes_review_v2.add_argument("--candidates", required=True)
+    new_scenes_review_v2.add_argument("--out-dir", required=True)
+    new_scenes_review_v2.add_argument("--count", type=int, default=20)
+    new_scenes_review_v2.add_argument("--build-vam-package", default="true")
+    new_scenes_review_v2.add_argument("--build-static-ui", default="true")
+
+    cycle_features_v1 = subparsers.add_parser("extract-motion-cycle-features-v1", help="Extract cycle-aware controller motion features from relative window tracks.")
+    cycle_features_v1.add_argument("--run-dir", required=True)
+    cycle_features_v1.add_argument("--out-jsonl", required=True)
+    cycle_features_v1.add_argument("--report", required=True)
+
+    motion_semantics_v1 = subparsers.add_parser("resolve-new-scenes-motion-semantics-v1", help="Resolve new scenes with cycle-aware Motion Semantics v1.")
+    motion_semantics_v1.add_argument("--new-run", required=True)
+    motion_semantics_v1.add_argument("--pose-resolved", required=True)
+    motion_semantics_v1.add_argument("--cycle-features", required=True)
+    motion_semantics_v1.add_argument("--relational-features", default=None)
+    motion_semantics_v1.add_argument("--ontology", required=True)
+    motion_semantics_v1.add_argument("--cycle-rules", required=True)
+    motion_semantics_v1.add_argument("--manual-gt", required=True)
+    motion_semantics_v1.add_argument("--out-jsonl", required=True)
+    motion_semantics_v1.add_argument("--report", required=True)
+
+    motion_candidates_v1 = subparsers.add_parser("build-new-scenes-motion-candidate-db-v1", help="Build motion-state candidate DB from Motion Semantics v1.")
+    motion_candidates_v1.add_argument("--new-run", required=True)
+    motion_candidates_v1.add_argument("--motion-resolved", required=True)
+    motion_candidates_v1.add_argument("--out-jsonl", required=True)
+    motion_candidates_v1.add_argument("--out-csv", required=True)
+    motion_candidates_v1.add_argument("--report", required=True)
+
+    motion_review_v1 = subparsers.add_parser("export-motion-semantics-review-v1", help="Export a motion-cycle semantic review batch.")
+    motion_review_v1.add_argument("--new-run", required=True)
+    motion_review_v1.add_argument("--candidates", required=True)
+    motion_review_v1.add_argument("--out-dir", required=True)
+    motion_review_v1.add_argument("--count", type=int, default=20)
+    motion_review_v1.add_argument("--build-static-ui", default="true")
+    motion_review_v1.add_argument("--build-vam-package", default="true")
+
+    reviewed_index = subparsers.add_parser("build-reviewed-window-index", help="Build an audit-only index of all reviewed windows/items across runs.")
+    reviewed_index.add_argument("--run-dir", required=True)
+    reviewed_index.add_argument("--include-runs", required=True)
+    reviewed_index.add_argument("--out-jsonl", required=True)
+    reviewed_index.add_argument("--out-csv", required=True)
+    reviewed_index.add_argument("--report", required=True)
+
+    duplicate_audit = subparsers.add_parser("audit-review-duplicates", help="Audit exact and near duplicate review selections.")
+    duplicate_audit.add_argument("--reviewed-index", required=True)
+    duplicate_audit.add_argument("--out", required=True)
+
+    strict_novel_review = subparsers.add_parser("export-strict-novel-review", help="Export a deduplicated novel semantic review batch.")
+    strict_novel_review.add_argument("--run-dir", required=True)
+    strict_novel_review.add_argument("--candidate-db", required=True)
+    strict_novel_review.add_argument("--reviewed-index", required=True)
+    strict_novel_review.add_argument("--out-dir", required=True)
+    strict_novel_review.add_argument("--count", type=int, default=10)
+    strict_novel_review.add_argument("--max-per-scene", type=int, default=2)
+    strict_novel_review.add_argument("--max-per-sample", type=int, default=1)
+    strict_novel_review.add_argument("--allow-reviewed-overlap", default="false")
+    strict_novel_review.add_argument("--allow-near-duplicates", default="false")
+    strict_novel_review.add_argument("--diversity-mode", default="strict")
+    strict_novel_review.add_argument("--build-vam-package", default="true")
+    strict_novel_review.add_argument("--build-static-ui", default="true")
+
+    export_review_segments = subparsers.add_parser("export-review-timeline-segments-to-vam", help="Copy review-only Timeline segments into VaM PluginData animations for direct manual import.")
+    export_review_segments.add_argument("--review-dir", required=True)
+    export_review_segments.add_argument("--vam-animations-dir", required=True)
+    export_review_segments.add_argument("--run-dir", default=None)
+    export_review_segments.add_argument("--subdir", default=None)
+
+    sanitize_scenes = subparsers.add_parser("sanitize-run-scene-identifiers", help="Replace local scene names in run artifacts with stable neutral aliases.")
+    sanitize_scenes.add_argument("--run-dir", required=True)
+    sanitize_scenes.add_argument("--alias-map-out", required=True)
+    sanitize_scenes.add_argument("--report", required=True)
+    sanitize_scenes.add_argument("--dry-run", default="false")
 
     ledger = subparsers.add_parser("build-human-review-ledger", help="Build audit-only human review memory ledger.")
     ledger.add_argument("--run-dir", required=True)
@@ -2349,6 +2949,519 @@ def cmd_run_clean_v3_v16_calibration(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_run_clean_v3_pose_support_rescan(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.pose_support_rescan import run_clean_v3_pose_support_rescan
+
+    summary = run_clean_v3_pose_support_rescan(args.run_dir, args.out_suffix)
+    print(f"clean_v3 pose/support rescan complete: {args.run_dir}")
+    print(f"Cowgirl DB v8 categories: {summary['cowgirl_candidate_db_v8_counts']}")
+    print(f"Focused review: {summary['focused_review']['review_dir']}")
+    return 0
+
+
+def cmd_compare_new_scenes_to_clean_v3(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.reports.new_scene_delta_report import compare_new_scenes_to_clean_v3
+
+    summary = compare_new_scenes_to_clean_v3(args.base_run, args.new_run, args.out)
+    print(f"New scene delta report written: {args.out}")
+    print(f"New scenes: {summary.get('new_scenes')}; motion sources: {summary.get('new_sources')}; windows: {summary.get('new_windows')}")
+    return 0
+
+
+def cmd_run_new_scenes_delta_import(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.runs.new_scenes_delta_import import run_new_scenes_delta_import
+
+    summary = run_new_scenes_delta_import(args.raw_dir, args.base_run, args.out_run)
+    print(f"New scenes delta import complete: {args.out_run}")
+    print(f"Scenes: {summary.get('scene_count_found')}; sources: {summary.get('motion_sources')}; windows: {summary.get('movement_windows')}")
+    print(f"Review items: {((summary.get('review') or {}).get('review_items'))}")
+    return 0
+
+
+def cmd_build_focused_new_scenes_review(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.new_scene_review_planner import build_focused_new_scenes_review
+
+    summary = build_focused_new_scenes_review(args.run_dir, args.previous_review, args.out_dir)
+    print(f"Focused new-scenes review written: {args.out_dir}")
+    print(f"Selected: {summary['selected']}; counts={summary['selected_counts']}")
+    print(f"Static UI: {(summary['static_review_ui'] or {}).get('index')}")
+    return 0
+
+
+def cmd_build_strict_new_scenes_cowgirl_review(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.new_scene_review_planner import build_strict_new_scenes_cowgirl_review
+
+    summary = build_strict_new_scenes_cowgirl_review(
+        args.run_dir,
+        args.out_dir,
+        args.previous_review,
+        args.human_answers,
+        args.batch_size,
+        args.batch_index,
+    )
+    print(f"Strict new-scenes Cowgirl review written: {args.out_dir}")
+    print(f"Selected: {summary['selected']}; counts={summary['selected_counts']}")
+    if summary.get("batch_size"):
+        print(f"Batch: {summary['batch_index']} of size {summary['batch_size']} from {summary['full_selected_count']} selected candidates")
+    print(f"Human answers used: {summary['human_answer_count']}; excluded windows={summary['human_exclusion_windows']}")
+    print(f"Static UI: {(summary['static_review_ui'] or {}).get('index')}")
+    return 0
+
+
+def cmd_resolve_new_scenes_pose_first_semantics_v2(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.new_scenes_semantic_rescan_v2 import resolve_new_scenes_pose_first_semantics_v2
+
+    summary = resolve_new_scenes_pose_first_semantics_v2(
+        args.new_run,
+        args.base_run,
+        args.ontology,
+        args.rules,
+        args.manual_gt,
+        args.out_jsonl,
+        args.report,
+    )
+    if summary.get("status") == "blocked":
+        print(f"New-scenes semantic rescan blocked: {summary.get('blocked_report')}")
+        print(f"Missing inputs: {summary.get('missing')}")
+        return 0
+    print(f"New-scenes pose-first v2 resolved: {summary['out_jsonl']}")
+    print(f"Records: {summary['records']}; families={summary['family_counts']}")
+    return 0
+
+
+def cmd_build_new_scenes_ontology_candidate_db_v2(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.new_scenes_semantic_rescan_v2 import build_new_scenes_ontology_candidate_db_v2
+
+    summary = build_new_scenes_ontology_candidate_db_v2(
+        args.new_run,
+        args.resolved,
+        args.ontology,
+        args.manual_gt,
+        args.out_jsonl,
+        args.out_csv,
+        args.report,
+    )
+    print(f"New-scenes ontology candidate DB v2 written: {summary['out_jsonl']}")
+    print(f"Records: {summary['records']}; categories={summary['category_counts']}")
+    return 0
+
+
+def cmd_write_new_scenes_family_reports_v2(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.new_scenes_semantic_rescan_v2 import write_new_scenes_family_reports_v2
+
+    summary = write_new_scenes_family_reports_v2(args.new_run, args.candidates, args.out_dir)
+    print(f"New-scenes family reports v2 written: {summary['reports_dir']}")
+    print(f"Drift report: {summary['drift_report']}")
+    return 0
+
+
+def cmd_export_new_scenes_semantic_review_v2(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.new_scenes_semantic_rescan_v2 import export_new_scenes_semantic_review_v2
+
+    summary = export_new_scenes_semantic_review_v2(
+        args.new_run,
+        args.candidates,
+        args.out_dir,
+        count=args.count,
+        build_vam_package=_as_bool(args.build_vam_package),
+        build_static_ui=_as_bool(args.build_static_ui),
+    )
+    print(f"New-scenes semantic review v2 written: {summary['out_dir']}")
+    print(f"Items: {summary['review_items']}; static UI={(summary['static_ui'] or {}).get('index')}")
+    return 0
+
+
+def cmd_extract_motion_cycle_features_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.features.motion_cycle_features import extract_motion_cycle_features_v1
+
+    summary = extract_motion_cycle_features_v1(args.run_dir, args.out_jsonl, args.report)
+    print(f"Motion cycle features written: {summary['out_jsonl']}")
+    print(f"Records: {summary['records']}; loaded_npz={summary['loaded_npz']}; missing_npz={summary['missing_npz']}")
+    return 0
+
+
+def cmd_resolve_new_scenes_motion_semantics_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.motion_semantic_resolver import resolve_new_scenes_motion_semantics_v1
+
+    summary = resolve_new_scenes_motion_semantics_v1(
+        args.new_run,
+        args.pose_resolved,
+        args.cycle_features,
+        args.ontology,
+        args.cycle_rules,
+        args.manual_gt,
+        args.out_jsonl,
+        args.report,
+        relational_features=args.relational_features,
+    )
+    print(f"Motion semantics v1 written: {summary['out_jsonl']}")
+    print(f"Records: {summary['records']}; states={summary['motion_state_counts']}")
+    return 0
+
+
+def cmd_build_new_scenes_motion_candidate_db_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.motion_semantic_resolver import build_new_scenes_motion_candidate_db_v1
+
+    summary = build_new_scenes_motion_candidate_db_v1(args.new_run, args.motion_resolved, args.out_jsonl, args.out_csv, args.report)
+    print(f"Motion candidate DB v1 written: {summary['out_jsonl']}")
+    print(f"Records: {summary['records']}; categories={summary['category_counts']}")
+    return 0
+
+
+def cmd_export_motion_semantics_review_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.motion_semantic_resolver import export_motion_semantics_review_v1
+
+    summary = export_motion_semantics_review_v1(
+        args.new_run,
+        args.candidates,
+        args.out_dir,
+        count=args.count,
+        build_static_ui=_as_bool(args.build_static_ui),
+        build_vam_package=_as_bool(args.build_vam_package),
+    )
+    print(f"Motion semantics review v1 written: {summary['out_dir']}")
+    print(f"Items: {summary['review_items']}; static UI={(summary['static_ui'] or {}).get('index')}")
+    return 0
+
+
+def cmd_export_review_timeline_segments_to_vam(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.vam_timeline_segment_export import export_review_timeline_segments_to_vam
+
+    summary = export_review_timeline_segments_to_vam(args.review_dir, args.vam_animations_dir, args.run_dir, args.subdir)
+    print(f"Review Timeline segments copied to: {summary['target_dir']}")
+    print(f"Copied: {summary['copied']}; unavailable: {summary['unavailable']}")
+    print(f"Index: {summary['index_jsonl']}")
+    return 0
+
+
+def cmd_sanitize_run_scene_identifiers(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.runs.sanitize_scene_identifiers import sanitize_run_scene_identifiers
+
+    summary = sanitize_run_scene_identifiers(
+        args.run_dir,
+        args.alias_map_out,
+        args.report,
+        dry_run=_as_bool(args.dry_run),
+    )
+    print(f"Scene identifiers sanitized: {summary['run_dir']}")
+    print(f"Changed files: {summary['changed_files']}; aliases: {summary['scene_aliases']}; dry_run={summary['dry_run']}")
+    print(f"Report: {summary['report']}")
+    return 0
+
+
+def cmd_build_reviewed_window_index(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.review_deduplication import build_reviewed_window_index
+
+    summary = build_reviewed_window_index(args.run_dir, args.include_runs, args.out_jsonl, args.out_csv, args.report)
+    print(f"Reviewed window index written: {args.out_jsonl}")
+    print(f"Records: {summary['records']}; exact={summary['exact_duplicate_count']}; near={summary['near_duplicate_count']}")
+    return 0
+
+
+def cmd_audit_review_duplicates(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.review_deduplication import audit_review_duplicates
+
+    summary = audit_review_duplicates(args.reviewed_index, args.out)
+    print(f"Review duplicate audit written: {args.out}")
+    print(f"Total: {summary['total']}; exact={summary['exact_duplicate_count']}; near={summary['near_duplicate_count']}")
+    return 0
+
+
+def cmd_export_strict_novel_review(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.review_deduplication import export_strict_novel_review
+
+    summary = export_strict_novel_review(
+        args.run_dir,
+        args.candidate_db,
+        args.reviewed_index,
+        args.out_dir,
+        count=args.count,
+        max_per_scene=args.max_per_scene,
+        max_per_sample=args.max_per_sample,
+        allow_reviewed_overlap=_as_bool(args.allow_reviewed_overlap),
+        allow_near_duplicates=_as_bool(args.allow_near_duplicates),
+        build_vam_package=_as_bool(args.build_vam_package),
+        build_static_ui=_as_bool(args.build_static_ui),
+        diversity_mode=args.diversity_mode,
+    )
+    print(f"Strict novel review written: {args.out_dir}")
+    print(f"Exported: {summary['exported_count']}/{summary['requested_count']}; trust={summary['quality']['trust_level']}")
+    return 0
+
+
+def cmd_build_human_reviewed_ml_labels_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.ml.human_label_dataset import build_human_reviewed_ml_labels_v1
+
+    summary = build_human_reviewed_ml_labels_v1(args.run_dir, args.human_ledger, args.out_jsonl, args.report)
+    print(f"Human-reviewed ML labels written: {args.out_jsonl}")
+    print(f"Rows={summary.get('total_human_reviewed')}; cowgirl={summary.get('cowgirl_label_counts')}; clean={summary.get('clean_motion_label_counts')}")
+    return 0
+
+
+def cmd_build_cowgirl_ml_feature_table_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.ml.supervised_feature_table import build_cowgirl_ml_feature_table_v1
+
+    summary = build_cowgirl_ml_feature_table_v1(
+        args.run_dir,
+        args.labels,
+        args.relative_features,
+        args.trajectory_features,
+        args.pose_features,
+        args.pose_semantics,
+        args.partner_relative_features,
+        args.interaction_semantics,
+        args.semantic_actions,
+        args.candidate_db,
+        args.out_npz,
+        args.out_meta,
+        args.report,
+    )
+    print(f"Cowgirl ML feature table written: {args.out_npz}")
+    print(f"Rows={summary.get('rows')}; features={summary.get('features')}; shape={summary.get('shape')}")
+    return 0
+
+
+def cmd_build_cowgirl_ml_labels_v2(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.ml.cowgirl_ml_label_dataset_v2 import build_cowgirl_ml_labels_v2
+
+    summary = build_cowgirl_ml_labels_v2(args.base_run, args.new_run, args.human_ledger, args.manual_gt, args.out_jsonl, args.report)
+    print(f"Cowgirl ML labels v2 written: {args.out_jsonl}")
+    print(f"Rows={summary.get('rows')}; counts={summary.get('label_counts', {}).get('label_cowgirl_semantic_family')}")
+    return 0
+
+
+def cmd_build_cowgirl_ml_labels_v3(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.ml.cowgirl_ml_label_dataset_v3 import build_cowgirl_ml_labels_v3
+
+    summary = build_cowgirl_ml_labels_v3(args.new_run, args.out_jsonl, args.report)
+    print(f"Cowgirl ML labels v3 written: {args.out_jsonl}")
+    print(f"Rows={summary.get('rows')}; counts={summary.get('label_counts', {}).get('label_cowgirl_clean_motion')}")
+    return 0
+
+
+def cmd_build_cowgirl_ml_feature_table_v2(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.ml.cowgirl_ml_feature_table_v2 import build_cowgirl_ml_feature_table_v2
+
+    summary = build_cowgirl_ml_feature_table_v2(
+        args.labels,
+        args.pose_resolved,
+        args.cycle_features,
+        args.motion_resolved,
+        args.candidates,
+        args.manual_gt,
+        args.out_npz,
+        args.out_meta,
+        args.report,
+    )
+    print(f"Cowgirl ML feature table v2 written: {args.out_npz}")
+    print(f"Rows={summary.get('rows')}; features={summary.get('features')}; shape={summary.get('shape')}; labeled={summary.get('labeled_rows')}")
+    return 0
+
+
+def cmd_train_cowgirl_ml_v2(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.ml.cowgirl_ml_model_v2 import train_cowgirl_ml_v2
+
+    summary = train_cowgirl_ml_v2(args.feature_table, args.metadata, args.out_dir)
+    print(f"Cowgirl ML v2 output: {args.out_dir}")
+    print(f"Trained={summary.get('trained')}; verdict={summary.get('trust_verdict')}")
+    return 0
+
+
+def cmd_score_new_scenes_cowgirl_ml_v2(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.ml.cowgirl_ml_model_v2 import score_new_scenes_cowgirl_ml_v2
+
+    summary = score_new_scenes_cowgirl_ml_v2(args.model_dir, args.feature_table, args.metadata, args.out_jsonl, args.report)
+    print(f"Cowgirl ML v2 scores written: {args.out_jsonl}")
+    print(f"Status={summary.get('status')}; rows={summary.get('rows')}; buckets={summary.get('bucket_counts')}")
+    return 0
+
+
+def cmd_export_ml_assisted_cowgirl_review_v2(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.ml.cowgirl_ml_review_v2 import export_ml_assisted_cowgirl_review_v2
+
+    summary = export_ml_assisted_cowgirl_review_v2(
+        args.new_run,
+        args.scores,
+        args.candidates,
+        args.out_dir,
+        args.count,
+        build_static_ui=_as_bool(args.build_static_ui),
+        build_vam_package=_as_bool(args.build_vam_package),
+    )
+    print(f"ML-assisted Cowgirl review v2 written: {args.out_dir}")
+    print(f"Selected={summary.get('selected')}; buckets={summary.get('bucket_counts')}")
+    return 0
+
+
+def cmd_extract_relational_semantic_features_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.features.relational_semantic_features import extract_relational_semantic_features_v1
+
+    summary = extract_relational_semantic_features_v1(
+        args.run_dir,
+        args.pair_windows,
+        args.pair_features,
+        args.sample_index,
+        args.controller_map,
+        args.out_jsonl,
+        args.report,
+    )
+    print(f"Relational semantic features written: {args.out_jsonl}")
+    print(f"Rows={summary.get('rows')}; pair_errors={summary.get('pair_errors')}")
+    return 0
+
+
+def cmd_extract_rig_anatomy_features_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.features.rig_anatomy_features import extract_rig_anatomy_features_v1
+
+    summary = extract_rig_anatomy_features_v1(
+        args.run_dir,
+        args.anatomy,
+        args.roles,
+        args.out_jsonl,
+        args.report,
+    )
+    print(f"Rig anatomy features written: {args.out_jsonl}")
+    print(f"Rows={summary.get('records')}; dominant_regions={summary.get('dominant_regions')}")
+    return 0
+
+
+def cmd_build_nlp_lexicon_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.nlp.external_lexicon_import import build_nlp_lexicon_v1
+
+    summary = build_nlp_lexicon_v1(
+        args.manual,
+        args.sources,
+        args.out,
+        args.report,
+        allow_web=_as_bool(args.allow_web),
+    )
+    print(f"NLP lexicon written: {args.out}")
+    print(f"Active={summary.get('active_entries')}; candidate={summary.get('candidate_entries')}")
+    return 0
+
+
+def cmd_resolve_nlp_tokens_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.nlp.nlp_token_resolver import resolve_nlp_tokens_v1
+
+    result = resolve_nlp_tokens_v1(args.prompt, args.lexicon, args.component_ontology, args.out)
+    print(f"NLP token resolution written: {args.out}")
+    print(f"Matches={len(result.get('matches') or [])}; unresolved={result.get('unresolved_requirements')}")
+    return 0
+
+
+def cmd_build_motion_intent_from_prompt_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.nlp.nlp_token_resolver import build_motion_intent_from_prompt_v1
+
+    result = build_motion_intent_from_prompt_v1(args.prompt, args.lexicon, args.component_ontology, args.out)
+    plan = result.get("intent_plan") or {}
+    print(f"Motion intent plan written: {args.out}")
+    phases = plan.get("phases") or plan.get("sequence_phases") or []
+    family = ((phases[0] or {}).get("base_state") or {}).get("family") if phases else None
+    print(f"Family={family}; phases={len(phases)}")
+    return 0
+
+
+def cmd_collect_web_motion_context_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.research.web_context_research import collect_web_motion_context_v1
+
+    summary = collect_web_motion_context_v1(
+        args.topics,
+        args.out_dir,
+        allow_web=_as_bool(args.allow_web),
+        max_sources_per_category=args.max_sources_per_category,
+    )
+    print(f"Web-context research written: {args.out_dir}")
+    print(f"Cards={summary.get('cards')}; blocked={summary.get('blocked_fetches')}")
+    return 0
+
+
+def cmd_build_web_context_ontology_patches_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.research.web_context_ontology_patches import build_web_context_ontology_patches_v1
+
+    summary = build_web_context_ontology_patches_v1(
+        args.research_dir,
+        args.current_ontology,
+        args.current_anatomy,
+        args.out_yaml,
+        args.report,
+    )
+    print(f"Inactive web-context patch candidates written: {args.out_yaml}")
+    print(f"Candidates={summary.get('patch_candidates')}; accepted={summary.get('accepted_candidates', 0)}")
+    return 0
+
+
+def cmd_build_research_client_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.ui.research_client import build_research_client_v0
+
+    summary = build_research_client_v0(args.run_dir, args.new_run, args.out_dir)
+    print(f"Research client written: {summary.get('index')}")
+    return 0
+
+
+def cmd_split_cowgirl_ml_dataset_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.ml.grouped_splits import split_cowgirl_ml_dataset_v1
+
+    summary = split_cowgirl_ml_dataset_v1(args.feature_table, args.metadata, args.out_dir, args.group_by, args.seed)
+    print(f"Cowgirl ML split written: {args.out_dir}")
+    print(f"Status={summary.get('status')}; split_counts={summary.get('split_counts')}; leakage={summary.get('leakage_warnings')}")
+    return 0
+
+
+def cmd_train_cowgirl_ml_baseline_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.ml.cowgirl_baseline_model import train_cowgirl_ml_baseline_v1
+
+    summary = train_cowgirl_ml_baseline_v1(args.feature_table, args.metadata, args.splits, args.out_dir)
+    print(f"Cowgirl ML baseline output: {args.out_dir}")
+    print(f"Trained={summary.get('trained')}; model_type={summary.get('model_type', summary.get('reason'))}")
+    return 0
+
+
+def cmd_score_clean_v3_with_cowgirl_model_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.ml.cowgirl_model_scoring import score_clean_v3_with_cowgirl_model_v1
+
+    summary = score_clean_v3_with_cowgirl_model_v1(args.run_dir, args.model_dir, args.feature_source, args.out_jsonl, args.report)
+    print(f"Cowgirl model scores written: {args.out_jsonl}")
+    print(f"Status={summary.get('status')}; rows={summary.get('rows')}; priorities={summary.get('priority_counts')}")
+    return 0
+
+
+def cmd_export_ml_assisted_cowgirl_review_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.ml_assisted_review_batch import export_ml_assisted_cowgirl_review_v1
+
+    summary = export_ml_assisted_cowgirl_review_v1(
+        args.run_dir,
+        args.model_scores,
+        args.reviewed_index,
+        args.out_dir,
+        count=args.count,
+        max_per_scene=args.max_per_scene,
+        max_per_sample=args.max_per_sample,
+        build_vam_package=_as_bool(args.build_vam_package),
+        build_static_ui=_as_bool(args.build_static_ui),
+    )
+    print(f"ML-assisted Cowgirl review written: {args.out_dir}")
+    print(f"Exported={summary.get('exported_count')}/{summary.get('requested_count')}; buckets={summary.get('bucket_counts')}")
+    return 0
+
+
+def cmd_evaluate_ml_assisted_review_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.ml.ml_review_evaluation import evaluate_ml_assisted_review_v1
+
+    summary = evaluate_ml_assisted_review_v1(args.review_dir, args.model_scores, args.answers, args.out)
+    print(f"ML-assisted review evaluation written: {args.out}")
+    print(f"Answers={summary.get('answers')}; helped={summary.get('ml_v1_helped')}; buckets={list((summary.get('bucket_stats') or {}).keys())}")
+    return 0
+
+
+def cmd_run_cowgirl_ml_active_learning_v2(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.ml.active_learning_loop import run_cowgirl_ml_active_learning_v2
+
+    summary = run_cowgirl_ml_active_learning_v2(args.run_dir, args.review_dir, args.out_dir)
+    print(f"Cowgirl ML active learning v2 output: {args.out_dir}")
+    print(f"Status={summary.get('status')}; answers_found={summary.get('answers_found')}")
+    return 0
+
+
 def cmd_build_human_review_ledger(args: argparse.Namespace) -> int:
     from vam_timeline_ai.audits.human_review_memory import build_human_review_ledger
 
@@ -2460,11 +3573,573 @@ def cmd_build_static_review_ui(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_render_digital_twin_review_previews_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.visualization.digital_twin_preview import render_digital_twin_review_previews_v0
+
+    summary = render_digital_twin_review_previews_v0(args.run_dir, args.review_dir, args.out_dir)
+    print(f"Digital twin previews written: {summary['out_dir']}")
+    print(f"Rendered: {summary['previews_rendered']}; unavailable: {summary['could_not_visualize']}")
+    print(f"Report written: {summary['report']}")
+    if summary.get("static_review_ui"):
+        print(f"Static UI refreshed: {summary['static_review_ui'].get('index')}")
+    return 0
+
+
+def cmd_render_digital_twin_previews_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.visualization.digital_twin_preview import render_digital_twin_previews_v1
+
+    summary = render_digital_twin_previews_v1(
+        args.run_dir,
+        args.review_dir,
+        args.out_dir,
+        fps=args.fps,
+        width=args.width,
+        height=args.height,
+        frames=args.frames,
+        make_gif=_as_bool(args.make_gif),
+        make_mp4=args.make_mp4,
+        view=args.view,
+    )
+    print(f"Digital twin animated previews written: {summary['out_dir']}")
+    print(
+        "Rendered: "
+        f"{summary['previews_rendered']}; GIFs: {summary['gif_created']}; "
+        f"MP4s: {summary['mp4_created']}; sheets: {summary['contact_sheets_created']}"
+    )
+    print(f"Report written: {summary['report']}")
+    if summary.get("static_review_ui"):
+        print(f"Static UI refreshed: {summary['static_review_ui'].get('index')}")
+    return 0
+
+
+def cmd_build_visual_judge_requests_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.visualization.visual_judge_requests import build_visual_judge_requests_v0
+
+    summary = build_visual_judge_requests_v0(args.review_dir, args.preview_dir, args.out_jsonl, mode=args.mode)
+    print(f"Visual judge requests written: {summary['out_jsonl']}")
+    print(f"Requests: {summary['requests']}; primary types: {summary['by_primary_visual_type']}")
+    print(f"Report written: {summary['report']}")
+    return 0
+
+
+def cmd_build_vam_capture_requests_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.vision.vam_capture_requests import build_vam_capture_requests_v0
+
+    summary = build_vam_capture_requests_v0(args.review_dir, args.out_jsonl, args.output_root, args.frame_count, args.duration_seconds)
+    print(f"VaM capture requests written: {summary['out_jsonl']}")
+    print(f"Requests: {summary['requests']}")
+    return 0
+
+
+def cmd_run_vam_reality_capture_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.vision.vam_capture_bridge_client import run_vam_reality_capture_v0
+
+    summary = run_vam_reality_capture_v0(args.requests, args.bridge_url, args.mode, args.out)
+    print(f"VaM reality capture status: {summary['status']}")
+    print(f"Bridge available: {summary.get('bridge_available')}; out: {summary['out']}")
+    if summary.get("blocked_report"):
+        print(f"Blocked report: {summary['blocked_report']}")
+    return 0
+
+
+def cmd_build_vam_capture_contact_sheets_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.vision.vam_capture_contact_sheet import build_vam_capture_contact_sheets_v0
+
+    summary = build_vam_capture_contact_sheets_v0(args.capture_results, args.out_dir)
+    print(f"VaM capture contact sheets written: {summary['out_dir']}")
+    print(f"Sheets: {summary['sheets']}; GIFs: {summary['gifs']}")
+    return 0
+
+
+def cmd_import_manual_pose_captures_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.datasets.manual_pose_capture_importer import import_manual_pose_captures_v1
+
+    summary = import_manual_pose_captures_v1(args.input_dir, args.out_jsonl, args.report)
+    print(f"Manual pose captures imported: {summary['captures']}")
+    print(f"Invalid files: {summary['invalid_files']}; report: {summary['report']}")
+    return 0
+
+
+def cmd_report_manual_pose_captures_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.reports.manual_pose_capture_report import report_manual_pose_captures_v1
+
+    summary = report_manual_pose_captures_v1(args.captures, args.out)
+    print(f"Manual pose capture report written: {summary['out']}")
+    print(f"Captures: {summary['captures']}; families: {summary['family_counts']}")
+    return 0
+
+
+def cmd_extract_manual_pose_captures_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.datasets.manual_pose_extraction import extract_manual_pose_captures_v1
+
+    summary = extract_manual_pose_captures_v1(args.zip, args.out_dir)
+    print(f"Manual pose captures extracted: {summary['files_extracted']}")
+    print(f"JSON: {summary['json_count']}; PNG: {summary['png_count']}; report: {summary['report']}")
+    return 0
+
+
+def cmd_parse_manual_pose_explanations_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.datasets.manual_pose_explanation_parser import parse_manual_pose_explanations_v1
+
+    summary = parse_manual_pose_explanations_v1(args.explanations, args.out_json, args.out_yaml, args.report)
+    print(f"Manual pose labels parsed: {summary['labels']}")
+    print(f"Families: {summary['family_counts']}; report: {summary['report']}")
+    return 0
+
+
+def cmd_build_manual_pose_ground_truth_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.datasets.manual_pose_ground_truth import build_manual_pose_ground_truth_v1
+
+    summary = build_manual_pose_ground_truth_v1(args.capture_dir, args.human_labels, args.out_jsonl, args.out_csv, args.report)
+    print(f"Manual pose ground truth rows: {summary['captures']}")
+    print(f"Matched labels: {summary['matched_labels']}; ontology patch: {summary['ontology_patch']}")
+    return 0
+
+
+def cmd_report_manual_pose_ground_truth_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.reports.manual_pose_ground_truth_report import report_manual_pose_ground_truth_v1
+
+    summary = report_manual_pose_ground_truth_v1(args.ground_truth, args.out_dir)
+    print(f"Manual pose ground-truth reports written: {summary['out_dir']}")
+    print(f"Captures: {summary['captures']}; families: {summary['family_counts']}")
+    return 0
+
+
+def cmd_build_manual_pose_ground_truth_gallery_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.reports.manual_pose_ground_truth_report import build_manual_pose_ground_truth_gallery_v1
+
+    summary = build_manual_pose_ground_truth_gallery_v1(args.ground_truth, args.out_html)
+    print(f"Manual pose ground-truth gallery written: {summary['out_html']}")
+    print(f"Captures: {summary['captures']}")
+    return 0
+
+
+def cmd_build_visual_judge_requests_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.vision.visual_judge_requests import build_visual_judge_requests_v1
+
+    summary = build_visual_judge_requests_v1(args.review_dir, args.vam_capture_sheets, args.digital_twin_previews, args.out_jsonl, mode=args.mode)
+    print(f"Visual judge requests v1 written: {summary['out_jsonl']}")
+    print(f"Requests: {summary['requests']}; primary types: {summary['by_primary_visual_type']}")
+    return 0
+
+
+def cmd_run_lmstudio_vlm_judge_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.vision.lmstudio_vlm_judge import run_lmstudio_vlm_judge_v0
+
+    summary = run_lmstudio_vlm_judge_v0(args.requests, args.base_url, args.model, args.out_jsonl, args.out_raw_dir, dry_run=_as_bool(args.dry_run))
+    print(f"LM Studio VLM judge status: {summary['status']}")
+    print(f"Model: {summary.get('model', args.model)}; requests: {summary.get('requests')}; out: {summary.get('out_jsonl')}")
+    if summary.get("blocked_report"):
+        print(f"Blocked report: {summary['blocked_report']}")
+    return 0
+
+
+def cmd_build_visual_judge_calibration_set_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.vision.visual_judge_calibration import build_visual_judge_calibration_set_v1
+
+    summary = build_visual_judge_calibration_set_v1(args.run_dir, args.out_dir)
+    print(f"Visual judge calibration set written: {summary['out_dir']}")
+    print(f"Items: {summary['items']}; with visual path: {summary['with_visual_path']}")
+    return 0
+
+
+def cmd_evaluate_vlm_visual_judge_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.vision.visual_judge_trust_gate import evaluate_vlm_visual_judge_v1
+
+    summary = evaluate_vlm_visual_judge_v1(args.calibration_set, args.base_url, args.model, args.out_dir, dry_run=_as_bool(args.dry_run))
+    print(f"VLM trust gate: {summary['trust_gate']}")
+    print(f"Out dir: {args.out_dir}")
+    return 0
+
+
+def cmd_build_multisignal_review_priorities_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.audits.multisignal_triage import build_multisignal_review_priorities_v0
+
+    summary = build_multisignal_review_priorities_v0(args.run_dir, args.review_dir, args.model_scores, args.visual_results, args.out_jsonl, args.report)
+    print(f"Multisignal priorities written: {summary['out_jsonl']}")
+    print(f"Priority counts: {summary['priority_counts']}")
+    return 0
+
+
+def cmd_translate_motion_intent_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.motion_intent_translator import translate_motion_intent_v1
+
+    summary = translate_motion_intent_v1(args.prompt, args.ontology, args.phrases, args.out)
+    print(f"Motion intent plan written: {summary['out']}")
+    print(f"Family: {summary['family']}; motion: {summary['motion_subtype']}; pose: {summary['pose_subtype']}; contact: {summary['contact_support']}")
+    if summary.get("invalid_mappings_prevented"):
+        print(f"Invalid mappings prevented: {summary['invalid_mappings_prevented']}")
+    return 0
+
+
+def cmd_ingest_semantik_sourcebook_v2(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.ontology_sourcebook import ingest_semantik_sourcebook_v2
+
+    summary = ingest_semantik_sourcebook_v2(args.source_docx, args.out_dir, args.report)
+    print(f"Semantik sourcebook ingestion status: {summary['status']}")
+    print(f"Report written: {args.report}")
+    if summary.get("manifest"):
+        print(f"Manifest: {summary['manifest']}")
+    return 0
+
+
+def cmd_build_semantic_stickman_pose_library_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.semantic_pose_library import build_semantic_stickman_pose_library_v1
+
+    summary = build_semantic_stickman_pose_library_v1(args.ontology, args.out_json, args.report)
+    print(f"Semantic stickman pose library written: {summary['out_json']}")
+    print(f"Poses: {summary['pose_count']}; families: {summary['family_counts']}")
+    return 0
+
+
+def cmd_build_semantic_motion_examples_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.semantic_motion_examples import build_semantic_motion_examples_v1
+
+    summary = build_semantic_motion_examples_v1(args.pose_library, args.ontology, args.out_json, args.report)
+    print(f"Semantic motion examples written: {summary['out_json']}")
+    print(f"Examples: {summary['example_count']}; families: {summary['family_counts']}")
+    return 0
+
+
+def cmd_render_semantic_stickman_previews_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.visualization.semantic_stickman_renderer import render_semantic_stickman_previews_v1
+
+    summary = render_semantic_stickman_previews_v1(
+        args.motion_examples,
+        args.out_dir,
+        width=args.width,
+        height=args.height,
+        fps=args.fps,
+        make_gif=_as_bool(args.make_gif),
+        make_contact_sheet=_as_bool(args.make_contact_sheet),
+    )
+    print(f"Semantic stickman previews written: {summary['out_dir']}")
+    print(f"Rendered: {summary['rendered']}; GIFs: {summary['gif_count']}; contact sheets: {summary['contact_sheet_count']}")
+    return 0
+
+
+def cmd_validate_semantic_stickman_examples_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.semantic_stickman_validation import validate_semantic_stickman_examples_v1
+
+    summary = validate_semantic_stickman_examples_v1(args.motion_examples, args.ontology, args.out)
+    print(f"Semantic stickman validation written: {summary['out']}")
+    print(f"Status: {summary['status']}; errors: {summary['errors']}; warnings: {summary['warnings']}")
+    return 0 if summary["status"] == "ok" else 1
+
+
+def cmd_build_semantic_stickman_gallery_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.reports.semantic_stickman_gallery import build_semantic_stickman_gallery_v1
+
+    summary = build_semantic_stickman_gallery_v1(args.preview_dir, args.out_html, args.out_md)
+    print(f"Semantic stickman gallery written: {summary['out_html']}")
+    print(f"Items: {summary['items']}; families: {summary['families']}")
+    return 0
+
+
+def cmd_render_semantic_stickman_previews_v2(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.visualization.semantic_stickman_renderer import render_semantic_stickman_previews_v2
+
+    summary = render_semantic_stickman_previews_v2(
+        args.motion_examples,
+        args.out_dir,
+        width=args.width,
+        height=args.height,
+        fps=args.fps,
+        make_gif=_as_bool(args.make_gif),
+        make_contact_sheet=_as_bool(args.make_contact_sheet),
+        show_labels=_as_bool(args.show_labels),
+        show_partner=_as_bool(args.show_partner),
+        show_alignment=_as_bool(args.show_alignment),
+        show_support_targets=_as_bool(args.show_support_targets),
+    )
+    print(f"Semantic stickman v2 previews written: {summary['out_dir']}")
+    print(f"Rendered: {summary['rendered']}; GIFs: {summary['gif_count']}; contact sheets: {summary['contact_sheet_count']}")
+    return 0
+
+
+def cmd_validate_semantic_stickman_examples_v2(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.semantic_stickman_validation import validate_semantic_stickman_examples_v2
+
+    summary = validate_semantic_stickman_examples_v2(args.motion_examples, args.preview_dir, args.ontology, args.out)
+    print(f"Semantic stickman v2 validation written: {summary['out']}")
+    print(f"Status: {summary['status']}; errors: {summary['errors']}; warnings: {summary['warnings']}")
+    return 0 if summary["status"] == "ok" else 1
+
+
+def cmd_build_semantic_stickman_gallery_v2(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.reports.semantic_stickman_gallery import build_semantic_stickman_gallery_v2
+
+    summary = build_semantic_stickman_gallery_v2(args.preview_dir, args.out_html, args.out_md)
+    print(f"Semantic stickman v2 gallery written: {summary['out_html']}")
+    print(f"Items: {summary['items']}; families: {summary['families']}")
+    return 0
+
+
+def cmd_build_semantic_motion_examples_v2_contact_aware(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.semantic_motion_examples import build_semantic_motion_examples_v2_contact_aware
+
+    summary = build_semantic_motion_examples_v2_contact_aware(args.pose_library, args.ontology, args.out_json, args.report)
+    print(f"Contact-aware semantic motion examples written: {summary['out_json']}")
+    print(f"Examples: {summary['example_count']}; valid alignments: {summary['alignment_valid']}; invalid: {summary['alignment_invalid']}")
+    return 0
+
+
+def cmd_render_semantic_stickman_previews_v3(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.visualization.semantic_stickman_renderer import render_semantic_stickman_previews_v3
+
+    summary = render_semantic_stickman_previews_v3(
+        args.motion_examples,
+        args.out_dir,
+        width=args.width,
+        height=args.height,
+        fps=args.fps,
+        make_gif=_as_bool(args.make_gif),
+        make_contact_sheet=_as_bool(args.make_contact_sheet),
+        show_labels=_as_bool(args.show_labels),
+        show_partner=_as_bool(args.show_partner),
+        show_alignment=_as_bool(args.show_alignment),
+        show_support_targets=_as_bool(args.show_support_targets),
+        show_contact_zone=_as_bool(args.show_contact_zone),
+        show_alignment_tolerance=_as_bool(args.show_alignment_tolerance),
+        show_validity_overlay=_as_bool(args.show_validity_overlay),
+        contact_aware=_as_bool(args.contact_aware),
+    )
+    print(f"Semantic stickman v3 previews written: {summary['out_dir']}")
+    print(f"Rendered: {summary['rendered']}; GIFs: {summary['gif_count']}; contact sheets: {summary['contact_sheet_count']}")
+    return 0
+
+
+def cmd_validate_semantic_stickman_examples_v3(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.semantic_stickman_validation import validate_semantic_stickman_examples_v3
+
+    summary = validate_semantic_stickman_examples_v3(args.motion_examples, args.preview_dir, args.ontology, args.out)
+    print(f"Semantic stickman v3 validation written: {summary['out']}")
+    print(f"Status: {summary['status']}; valid: {summary['valid']}; invalid: {summary['invalid']}; errors: {summary['errors']}; warnings: {summary['warnings']}")
+    return 0 if summary["status"] == "ok" else 1
+
+
+def cmd_build_semantic_stickman_gallery_v3(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.reports.semantic_stickman_gallery import build_semantic_stickman_gallery_v3
+
+    summary = build_semantic_stickman_gallery_v3(args.preview_dir, args.out_html, args.out_md)
+    print(f"Semantic stickman v3 gallery written: {summary['out_html']}")
+    print(f"Items: {summary['items']}; families: {summary['families']}")
+    return 0
+
+
+def cmd_export_vam_semantic_preview_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.vam_semantic_preview_exporter import export_vam_semantic_preview_v0
+
+    summary = export_vam_semantic_preview_v0(args.motion_examples, args.out_dir, duration=args.duration, fps=args.fps)
+    print(f"VaM semantic preview package written: {summary['out_dir']}")
+    print(f"Timeline clips exported: {summary['exported_clips']}; blocked: {summary['blocked_clips']}")
+    print(f"Import instructions: {summary['import_instructions']}")
+    return 0
+
+
+def cmd_validate_vam_semantic_preview_v0(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.vam_semantic_preview_validation import validate_vam_semantic_preview_v0
+
+    summary = validate_vam_semantic_preview_v0(args.preview_dir, args.out)
+    print(f"VaM semantic preview validation written: {summary['out']}")
+    print(f"Status: {summary['status']}; clips: {summary['clips']}; errors: {summary['errors']}; warnings: {summary['warnings']}")
+    return 0 if summary["status"] == "ok" else 1
+
+
+def cmd_export_manual_gt_timeline_examples_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.manual_gt_timeline_exporter import export_manual_gt_timeline_examples_v1
+
+    summary = export_manual_gt_timeline_examples_v1(args.ground_truth, args.out_dir, duration=args.duration, fps=args.fps, copy_to_vam=_as_bool(args.copy_to_vam))
+    print(f"Manual GT Timeline clips exported: {summary['clips_exported']}")
+    print(f"Out dir: {summary['out_dir']}")
+    if summary.get("copied_to_vam"):
+        print(f"Copied to VaM: {summary['copied_to_vam']}")
+    if summary.get("skipped"):
+        print(f"Skipped: {summary['skipped']}")
+    return 0
+
+
+def cmd_validate_manual_gt_timeline_examples_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.manual_gt_timeline_validation import validate_manual_gt_timeline_examples_v1
+
+    summary = validate_manual_gt_timeline_examples_v1(args.preview_dir, args.out)
+    print(f"Manual GT Timeline validation written: {summary['out']}")
+    print(f"Status: {summary['status']}; clips: {summary['clips']}; errors: {summary['errors']}; warnings: {summary['warnings']}")
+    return 0 if summary["status"] == "ok" else 1
+
+
+def cmd_export_manual_gt_timeline_examples_v2(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.manual_gt_timeline_exporter import export_manual_gt_timeline_examples_v2
+
+    summary = export_manual_gt_timeline_examples_v2(
+        args.ground_truth,
+        args.out_dir,
+        duration=args.duration,
+        keyframe_rate=args.keyframe_rate,
+        copy_to_vam=_as_bool(args.copy_to_vam),
+        include_rotations=_as_bool(args.include_rotations),
+        allow_dense_export=_as_bool(args.allow_dense_export),
+    )
+    print(f"Manual GT Timeline v2 clips exported: {summary['clips_exported']}")
+    print(f"Out dir: {summary['out_dir']}")
+    print(f"Rotation source report: {summary['rotation_source_report']}")
+    if summary.get("copied_to_vam"):
+        print(f"Copied to VaM: {summary['copied_to_vam']}")
+    if summary.get("skipped"):
+        print(f"Skipped: {summary['skipped']}")
+    return 0
+
+
+def cmd_validate_manual_gt_timeline_examples_v2(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.manual_gt_timeline_validation import validate_manual_gt_timeline_examples_v2
+
+    summary = validate_manual_gt_timeline_examples_v2(args.preview_dir, args.out, allow_dense_export=_as_bool(args.allow_dense_export))
+    print(f"Manual GT Timeline v2 validation written: {summary['out']}")
+    print(f"Status: {summary['status']}; clips: {summary['clips']}; errors: {summary['errors']}; warnings: {summary['warnings']}")
+    return 0 if summary["status"] == "ok" else 1
+
+
+def cmd_export_manual_gt_timeline_examples_v3(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.manual_gt_timeline_exporter import export_manual_gt_timeline_examples_v3
+
+    summary = export_manual_gt_timeline_examples_v3(
+        args.ground_truth,
+        args.out_dir,
+        duration=args.duration,
+        keyframe_rate=args.keyframe_rate,
+        copy_to_vam=_as_bool(args.copy_to_vam),
+        include_rotations=_as_bool(args.include_rotations),
+        require_hip_control=_as_bool(args.require_hip_control),
+        allow_high_key_density=_as_bool(args.allow_high_key_density),
+        allow_dense_export=_as_bool(args.allow_dense_export),
+    )
+    print(f"Manual GT Timeline v3 clips exported: {summary['clips_exported']}")
+    print(f"Out dir: {summary['out_dir']}")
+    print(f"Rotation source report: {summary['rotation_source_report']}")
+    print(f"Keyframe rate: {summary['keyframe_rate']}")
+    if summary.get("copied_to_vam"):
+        print(f"Copied to VaM: {summary['copied_to_vam']}")
+    if summary.get("skipped"):
+        print(f"Skipped: {summary['skipped']}")
+    return 0
+
+
+def cmd_validate_manual_gt_timeline_examples_v3(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.manual_gt_timeline_validation import validate_manual_gt_timeline_examples_v3
+
+    summary = validate_manual_gt_timeline_examples_v3(
+        args.preview_dir,
+        args.out,
+        allow_high_key_density=_as_bool(args.allow_high_key_density),
+        allow_dense_export=_as_bool(args.allow_dense_export),
+    )
+    print(f"Manual GT Timeline v3 validation written: {summary['out']}")
+    print(f"Status: {summary['status']}; clips: {summary['clips']}; errors: {summary['errors']}; warnings: {summary['warnings']}")
+    return 0 if summary["status"] == "ok" else 1
+
+
+def cmd_export_manual_gt_timeline_examples_v4(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.manual_gt_timeline_exporter import export_manual_gt_timeline_examples_v4
+
+    summary = export_manual_gt_timeline_examples_v4(
+        args.ground_truth,
+        args.out_dir,
+        duration=args.duration,
+        keyframe_rate=args.keyframe_rate,
+        copy_to_vam=_as_bool(args.copy_to_vam),
+        include_rotations=_as_bool(args.include_rotations),
+        require_hip_control=_as_bool(args.require_hip_control),
+        amplitude_profile=args.amplitude_profile,
+        allow_high_key_density=_as_bool(args.allow_high_key_density),
+        allow_dense_export=_as_bool(args.allow_dense_export),
+    )
+    print(f"Manual GT Timeline v4 clips exported: {summary['clips_exported']}")
+    print(f"Out dir: {summary['out_dir']}")
+    print(f"Rotation source report: {summary['rotation_source_report']}")
+    print(f"Motion amplitude profile report: {summary['motion_amplitude_profile_report']}")
+    print(f"Keyframe rate: {summary['keyframe_rate']}")
+    if summary.get("copied_to_vam"):
+        print(f"Copied to VaM: {summary['copied_to_vam']}")
+    if summary.get("skipped"):
+        print(f"Skipped: {summary['skipped']}")
+    return 0
+
+
+def cmd_validate_manual_gt_timeline_examples_v4(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.manual_gt_timeline_validation import validate_manual_gt_timeline_examples_v4
+
+    summary = validate_manual_gt_timeline_examples_v4(
+        args.preview_dir,
+        args.out,
+        allow_high_key_density=_as_bool(args.allow_high_key_density),
+        allow_dense_export=_as_bool(args.allow_dense_export),
+    )
+    print(f"Manual GT Timeline v4 validation written: {summary['out']}")
+    print(f"Status: {summary['status']}; clips: {summary['clips']}; errors: {summary['errors']}; warnings: {summary['warnings']}")
+    return 0 if summary["status"] == "ok" else 1
+
+
+def cmd_resolve_pose_first_semantics_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.pose_first_resolver import resolve_pose_first_semantics_v1
+
+    summary = resolve_pose_first_semantics_v1(
+        args.run_dir,
+        args.pose_semantics,
+        args.relative_features,
+        args.interaction_semantics,
+        args.candidate_db,
+        args.rules,
+        args.out_jsonl,
+        args.report,
+    )
+    print(f"Pose-first resolved semantics written: {summary['out_jsonl']}")
+    print(f"Records: {summary['records']}; families: {summary['family_counts']}; conflicts: {summary['conflicts']}")
+    print(f"Report written: {summary['report']}")
+    return 0
+
+
+def cmd_align_candidates_to_motion_ontology_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.semantics.ontology_alignment import align_candidates_to_motion_ontology_v1
+
+    summary = align_candidates_to_motion_ontology_v1(
+        args.run_dir,
+        args.ontology,
+        args.semantic_db,
+        args.cowgirl_db,
+        args.resolved,
+        args.out_jsonl,
+        args.report,
+    )
+    print(f"Ontology-aligned candidates written: {summary['out_jsonl']}")
+    print(f"Records: {summary['records']}; matches: {summary['match_counts']}; priorities: {summary['priority_counts']}")
+    print(f"Report written: {summary['report']}")
+    return 0
+
+
+def cmd_calibrate_motion_parameters_v1(args: argparse.Namespace) -> int:
+    from vam_timeline_ai.generation.motion_parameter_calibration import calibrate_motion_parameters_v1
+
+    summary = calibrate_motion_parameters_v1(
+        args.run_dir,
+        args.ontology,
+        args.resolved,
+        args.relative_features,
+        args.trajectory_features,
+        args.human_ledger,
+        args.out_json,
+        args.report,
+    )
+    print(f"Motion parameter profiles written: {summary['out_json']}")
+    print(f"Profiles: {summary['profiles']}; insufficient: {summary['insufficient']}; skipped: {summary['skipped']}")
+    print(f"Report written: {summary['report']}")
+    return 0
+
+
 def cmd_ingest_review_ui_answers(args: argparse.Namespace) -> int:
     from vam_timeline_ai.audits.review_answer_ingestion import ingest_review_ui_answers
 
-    summary = ingest_review_ui_answers(args.answers, args.review_dir, args.out_ledger, args.report)
-    print(f"Review UI answers ingested: {summary['answers']} answer(s), {summary['new_ledger_records']} new ledger record(s)")
+    summary = ingest_review_ui_answers(args.answers, args.review_dir, args.out_ledger, args.report, overwrite=_as_bool(args.overwrite))
+    print(f"Review UI answers ingested: {summary['answers']} answer(s), {summary['new_ledger_records']} new ledger record(s), skipped={summary.get('duplicates_skipped')}")
     print(f"Report written: {summary['report']}")
     return 0
 
@@ -3306,6 +4981,86 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_run_clean_v3_calibration_v1(args)
     if args.command == "run-clean-v3-v16-calibration":
         return cmd_run_clean_v3_v16_calibration(args)
+    if args.command == "run-clean-v3-pose-support-rescan":
+        return cmd_run_clean_v3_pose_support_rescan(args)
+    if args.command == "compare-new-scenes-to-clean-v3":
+        return cmd_compare_new_scenes_to_clean_v3(args)
+    if args.command == "run-new-scenes-delta-import":
+        return cmd_run_new_scenes_delta_import(args)
+    if args.command == "build-focused-new-scenes-review":
+        return cmd_build_focused_new_scenes_review(args)
+    if args.command == "build-strict-new-scenes-cowgirl-review":
+        return cmd_build_strict_new_scenes_cowgirl_review(args)
+    if args.command == "resolve-new-scenes-pose-first-semantics-v2":
+        return cmd_resolve_new_scenes_pose_first_semantics_v2(args)
+    if args.command == "build-new-scenes-ontology-candidate-db-v2":
+        return cmd_build_new_scenes_ontology_candidate_db_v2(args)
+    if args.command == "write-new-scenes-family-reports-v2":
+        return cmd_write_new_scenes_family_reports_v2(args)
+    if args.command == "export-new-scenes-semantic-review-v2":
+        return cmd_export_new_scenes_semantic_review_v2(args)
+    if args.command == "extract-motion-cycle-features-v1":
+        return cmd_extract_motion_cycle_features_v1(args)
+    if args.command == "extract-relational-semantic-features-v1":
+        return cmd_extract_relational_semantic_features_v1(args)
+    if args.command == "extract-rig-anatomy-features-v1":
+        return cmd_extract_rig_anatomy_features_v1(args)
+    if args.command == "build-nlp-lexicon-v1":
+        return cmd_build_nlp_lexicon_v1(args)
+    if args.command == "resolve-nlp-tokens-v1":
+        return cmd_resolve_nlp_tokens_v1(args)
+    if args.command == "build-motion-intent-from-prompt-v1":
+        return cmd_build_motion_intent_from_prompt_v1(args)
+    if args.command == "collect-web-motion-context-v1":
+        return cmd_collect_web_motion_context_v1(args)
+    if args.command == "build-web-context-ontology-patches-v1":
+        return cmd_build_web_context_ontology_patches_v1(args)
+    if args.command == "build-research-client-v0":
+        return cmd_build_research_client_v0(args)
+    if args.command == "resolve-new-scenes-motion-semantics-v1":
+        return cmd_resolve_new_scenes_motion_semantics_v1(args)
+    if args.command == "build-new-scenes-motion-candidate-db-v1":
+        return cmd_build_new_scenes_motion_candidate_db_v1(args)
+    if args.command == "export-motion-semantics-review-v1":
+        return cmd_export_motion_semantics_review_v1(args)
+    if args.command == "export-review-timeline-segments-to-vam":
+        return cmd_export_review_timeline_segments_to_vam(args)
+    if args.command == "sanitize-run-scene-identifiers":
+        return cmd_sanitize_run_scene_identifiers(args)
+    if args.command == "build-reviewed-window-index":
+        return cmd_build_reviewed_window_index(args)
+    if args.command == "audit-review-duplicates":
+        return cmd_audit_review_duplicates(args)
+    if args.command == "export-strict-novel-review":
+        return cmd_export_strict_novel_review(args)
+    if args.command == "build-human-reviewed-ml-labels-v1":
+        return cmd_build_human_reviewed_ml_labels_v1(args)
+    if args.command == "build-cowgirl-ml-feature-table-v1":
+        return cmd_build_cowgirl_ml_feature_table_v1(args)
+    if args.command == "build-cowgirl-ml-labels-v2":
+        return cmd_build_cowgirl_ml_labels_v2(args)
+    if args.command == "build-cowgirl-ml-labels-v3":
+        return cmd_build_cowgirl_ml_labels_v3(args)
+    if args.command == "build-cowgirl-ml-feature-table-v2":
+        return cmd_build_cowgirl_ml_feature_table_v2(args)
+    if args.command == "train-cowgirl-ml-v2":
+        return cmd_train_cowgirl_ml_v2(args)
+    if args.command == "score-new-scenes-cowgirl-ml-v2":
+        return cmd_score_new_scenes_cowgirl_ml_v2(args)
+    if args.command == "export-ml-assisted-cowgirl-review-v2":
+        return cmd_export_ml_assisted_cowgirl_review_v2(args)
+    if args.command == "split-cowgirl-ml-dataset-v1":
+        return cmd_split_cowgirl_ml_dataset_v1(args)
+    if args.command == "train-cowgirl-ml-baseline-v1":
+        return cmd_train_cowgirl_ml_baseline_v1(args)
+    if args.command == "score-clean-v3-with-cowgirl-model-v1":
+        return cmd_score_clean_v3_with_cowgirl_model_v1(args)
+    if args.command == "export-ml-assisted-cowgirl-review-v1":
+        return cmd_export_ml_assisted_cowgirl_review_v1(args)
+    if args.command == "evaluate-ml-assisted-review-v1":
+        return cmd_evaluate_ml_assisted_review_v1(args)
+    if args.command == "run-cowgirl-ml-active-learning-v2":
+        return cmd_run_cowgirl_ml_active_learning_v2(args)
     if args.command == "build-human-review-ledger":
         return cmd_build_human_review_ledger(args)
     if args.command == "build-error-taxonomy-report":
@@ -3332,6 +5087,96 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_launch_review_ui(args)
     if args.command == "build-static-review-ui":
         return cmd_build_static_review_ui(args)
+    if args.command == "render-digital-twin-review-previews-v0":
+        return cmd_render_digital_twin_review_previews_v0(args)
+    if args.command == "render-digital-twin-previews-v1":
+        return cmd_render_digital_twin_previews_v1(args)
+    if args.command == "build-visual-judge-requests-v0":
+        return cmd_build_visual_judge_requests_v0(args)
+    if args.command == "build-vam-capture-requests-v0":
+        return cmd_build_vam_capture_requests_v0(args)
+    if args.command == "run-vam-reality-capture-v0":
+        return cmd_run_vam_reality_capture_v0(args)
+    if args.command == "build-vam-capture-contact-sheets-v0":
+        return cmd_build_vam_capture_contact_sheets_v0(args)
+    if args.command == "import-manual-pose-captures-v1":
+        return cmd_import_manual_pose_captures_v1(args)
+    if args.command == "report-manual-pose-captures-v1":
+        return cmd_report_manual_pose_captures_v1(args)
+    if args.command == "extract-manual-pose-captures-v1":
+        return cmd_extract_manual_pose_captures_v1(args)
+    if args.command == "parse-manual-pose-explanations-v1":
+        return cmd_parse_manual_pose_explanations_v1(args)
+    if args.command == "build-manual-pose-ground-truth-v1":
+        return cmd_build_manual_pose_ground_truth_v1(args)
+    if args.command == "report-manual-pose-ground-truth-v1":
+        return cmd_report_manual_pose_ground_truth_v1(args)
+    if args.command == "build-manual-pose-ground-truth-gallery-v1":
+        return cmd_build_manual_pose_ground_truth_gallery_v1(args)
+    if args.command == "build-visual-judge-requests-v1":
+        return cmd_build_visual_judge_requests_v1(args)
+    if args.command == "run-lmstudio-vlm-judge-v0":
+        return cmd_run_lmstudio_vlm_judge_v0(args)
+    if args.command == "build-visual-judge-calibration-set-v1":
+        return cmd_build_visual_judge_calibration_set_v1(args)
+    if args.command == "evaluate-vlm-visual-judge-v1":
+        return cmd_evaluate_vlm_visual_judge_v1(args)
+    if args.command == "build-multisignal-review-priorities-v0":
+        return cmd_build_multisignal_review_priorities_v0(args)
+    if args.command == "translate-motion-intent-v1":
+        return cmd_translate_motion_intent_v1(args)
+    if args.command == "ingest-semantik-sourcebook-v2":
+        return cmd_ingest_semantik_sourcebook_v2(args)
+    if args.command == "build-semantic-stickman-pose-library-v1":
+        return cmd_build_semantic_stickman_pose_library_v1(args)
+    if args.command == "build-semantic-motion-examples-v1":
+        return cmd_build_semantic_motion_examples_v1(args)
+    if args.command == "render-semantic-stickman-previews-v1":
+        return cmd_render_semantic_stickman_previews_v1(args)
+    if args.command == "validate-semantic-stickman-examples-v1":
+        return cmd_validate_semantic_stickman_examples_v1(args)
+    if args.command == "build-semantic-stickman-gallery-v1":
+        return cmd_build_semantic_stickman_gallery_v1(args)
+    if args.command == "render-semantic-stickman-previews-v2":
+        return cmd_render_semantic_stickman_previews_v2(args)
+    if args.command == "validate-semantic-stickman-examples-v2":
+        return cmd_validate_semantic_stickman_examples_v2(args)
+    if args.command == "build-semantic-stickman-gallery-v2":
+        return cmd_build_semantic_stickman_gallery_v2(args)
+    if args.command == "build-semantic-motion-examples-v2-contact-aware":
+        return cmd_build_semantic_motion_examples_v2_contact_aware(args)
+    if args.command == "render-semantic-stickman-previews-v3":
+        return cmd_render_semantic_stickman_previews_v3(args)
+    if args.command == "validate-semantic-stickman-examples-v3":
+        return cmd_validate_semantic_stickman_examples_v3(args)
+    if args.command == "build-semantic-stickman-gallery-v3":
+        return cmd_build_semantic_stickman_gallery_v3(args)
+    if args.command == "export-vam-semantic-preview-v0":
+        return cmd_export_vam_semantic_preview_v0(args)
+    if args.command == "validate-vam-semantic-preview-v0":
+        return cmd_validate_vam_semantic_preview_v0(args)
+    if args.command == "export-manual-gt-timeline-examples-v1":
+        return cmd_export_manual_gt_timeline_examples_v1(args)
+    if args.command == "validate-manual-gt-timeline-examples-v1":
+        return cmd_validate_manual_gt_timeline_examples_v1(args)
+    if args.command == "export-manual-gt-timeline-examples-v2":
+        return cmd_export_manual_gt_timeline_examples_v2(args)
+    if args.command == "validate-manual-gt-timeline-examples-v2":
+        return cmd_validate_manual_gt_timeline_examples_v2(args)
+    if args.command == "export-manual-gt-timeline-examples-v3":
+        return cmd_export_manual_gt_timeline_examples_v3(args)
+    if args.command == "validate-manual-gt-timeline-examples-v3":
+        return cmd_validate_manual_gt_timeline_examples_v3(args)
+    if args.command == "export-manual-gt-timeline-examples-v4":
+        return cmd_export_manual_gt_timeline_examples_v4(args)
+    if args.command == "validate-manual-gt-timeline-examples-v4":
+        return cmd_validate_manual_gt_timeline_examples_v4(args)
+    if args.command == "resolve-pose-first-semantics-v1":
+        return cmd_resolve_pose_first_semantics_v1(args)
+    if args.command == "align-candidates-to-motion-ontology-v1":
+        return cmd_align_candidates_to_motion_ontology_v1(args)
+    if args.command == "calibrate-motion-parameters-v1":
+        return cmd_calibrate_motion_parameters_v1(args)
     if args.command == "ingest-review-ui-answers":
         return cmd_ingest_review_ui_answers(args)
     if args.command == "discover-controller-map":

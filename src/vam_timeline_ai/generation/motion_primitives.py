@@ -54,6 +54,7 @@ class MotionPrimitive:
     anchor_profile: dict[str, Any] = field(default_factory=dict)
     pose_context_requirements: dict[str, Any] = field(default_factory=dict)
     interaction_frame: str = "body_relative"
+    torso_requirement: str = "unknown"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

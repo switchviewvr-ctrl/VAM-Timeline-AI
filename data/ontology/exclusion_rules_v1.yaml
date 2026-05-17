@@ -1,0 +1,19 @@
+schema_version: exclusion_rules_v1
+exclusions:
+  - id: cowgirl_not_head_driver
+    if_family: cowgirl
+    forbidden_primary_motion_center: head_neck
+    resolves_to: bj_oral
+  - id: cowgirl_not_hand_driver
+    if_family: cowgirl
+    forbidden_primary_motion_center: hands
+    resolves_to: handjob
+  - id: kneeling_alone_not_doggy
+    if_pose_subtype: kneeling_general
+    not_enough_for_family: doggy
+  - id: lean_back_not_reverse
+    if_pose_subtype: cowgirl_lean_back_supported
+    forbidden_resolution_without_relation: reverse_cowgirl
+  - id: pose_context_not_clean_motion
+    if_clean_motion_gate: fail_low_motion
+    resolves_to: pose_context_hold

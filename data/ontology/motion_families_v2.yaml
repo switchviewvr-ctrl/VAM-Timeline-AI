@@ -1,0 +1,584 @@
+schema_version: motion_families_v2
+meaning_source: semantik_master_konsolidiert_docx
+sourcebook:
+  title: Semantik_Master_Konsolidiert.docx
+  source_path: <local-semantic-sourcebook-path>
+  extracted_text: data/ontology/sourcebooks/semantik_master_konsolidiert_extracted_v1.txt
+  sha256: 27ab5774b7937db4ee4b38b3ae0cc45ad5393170ca2f63f35f482e5e9d24de4a
+canonical_status: current_motion_ontology_source
+core_architecture:
+  direction: prompt_to_semantic_intent_to_motion_grammar_to_controller_curves
+  controller_curves_are: renderer_output_layer
+  data_ml_vlm_are: calibration_and_review_aids_only
+  root_mapping:
+    sourcebook_root_node_means:
+      - pelvisControl
+      - hipControl
+      - abdomen_region_when_needed
+    never_means:
+      - VaM Person atom root
+      - world transform
+      - scene transform
+  axis_legend:
+    x: lateral_spread_abduction_weight_shift
+    y: vertical_height_hover_ground_contact
+    z: forward_back_distance_impact_target_approach
+    pitch_x: torso_pelvis_forward_backward_tilt
+    yaw_y: horizontal_rotation_look_back_helical_coupling
+    roll_z: side_tilt_asymmetric_compensation
+  accepted_manual_gt_reference:
+    package: data/runs/clean_v3/generation/manual_gt_timeline_examples_v4
+    status: accepted_baseline_reference
+    note: Use v4 as the current review-only VaM controller mapping baseline; do not tune further without a specific user-reported VaM problem.
+  vam_controller_driver_mapping:
+    pelvis_hip:
+      primary_visible_driver: hipControl
+      secondary_or_follower: [pelvisControl, abdomenControl, abdomen2Control]
+      optional_small_amplifiers: [lThighControl, rThighControl]
+    head_neck:
+      primary_visible_driver: headControl
+      secondary_or_follower: [chestControl]
+    hands:
+      primary_visible_driver: [lHandControl, rHandControl]
+      secondary_or_follower: [lElbowControl, rElbowControl]
+families:
+  cowgirl:
+    family_id: cowgirl
+    description: Front rider-over-receiver state with bottom-up pelvis/hip driver, Y-axis dominant riding/bounce or planar grinding.
+    actor_role: rider
+    partner_role: receiver
+    coordinate_frame: [partner_pelvis_local, body_relative]
+    required_partner_relations: [rider_over_receiver, pelvis_aligned]
+    optional_partner_relations: [rider_facing_partner, facing_partner_or_front]
+    required_pose_subtypes: [cowgirl_upright, cowgirl_kneeling, cowgirl_squat, cowgirl_lean_forward_supported, cowgirl_lean_back_supported]
+    compatible_pose_subtypes:
+      - cowgirl_upright
+      - cowgirl_kneeling
+      - cowgirl_squat
+      - cowgirl_lean_forward_supported
+      - cowgirl_lean_back_supported
+      - cowgirl_sequential_spine_wave
+      - cowgirl_corkscrew_grind
+    default_pose_subtype: cowgirl_kneeling
+    primary_motion_centers: [pelvis_hip, thighs]
+    secondary_motion_centers: [abdomen_chest, head_neck]
+    followers:
+      abdomen: damped_follow_from_pelvis
+      chest: delayed_damped_follow_with_counter_rotation
+      head: stabilizing_lag_follow_look_at_horizon
+    anchors:
+      - feet_ik_planted_anchor
+      - knees_outward_pole_vector
+      - hands_optional_support
+    contact_support_contexts:
+      - hands_free
+      - hands_on_partner_chest
+      - hands_on_partner_pelvis_or_thighs
+      - hands_on_partner_legs_or_thighs
+      - hands_on_floor_or_bed
+      - hands_behind_support
+      - rear_floor_drop
+      - free_swinging_hands
+    axis_priority:
+      clean_bounce: [pelvis_y_translation, pelvis_pitch, chest_phase_lag, head_stabilization]
+      grinding: [pelvis_pitch_roll_yaw, xz_oval_or_figure8, chest_counter_rotation]
+      lean_forward: [chest_forward_down, hands_forward_support, pelvis_back_compensation]
+      lean_back: [chest_backward, hands_behind_pelvis, pelvis_pitch_up]
+    clean_motion_requirements:
+      - pose compatible with Cowgirl
+      - pelvis_hip or thighs are primary driver
+      - cyclic or semi-cyclic pelvis curves
+      - Y-axis bounce, XZ planar grind, corkscrew grind, or spine-wave is visible
+      - rider-over-receiver or known riding context
+      - feet/knees/hands are anchors or support, not primary family drivers
+      - no head-only or hand-only primary motion
+      - no VaM Person/root/world motion
+    pose_context_requirements:
+      - Cowgirl pose may exist without clean motion
+      - pelvis mostly static means pose_context_hold, not clean motion
+      - transition has high controller deltas while establishing anchors and no cyclic curves
+    generation_requirements:
+      - partner pelvis local frame
+      - rider pelvis aligned over partner pelvis
+      - lower body anchors or explicit synthetic support constraints
+      - semantic pelvis_hip maps to VaM hipControl as primary visible driver
+      - pelvisControl is light follower or static support, never sole Cowgirl driver
+      - lThighControl/rThighControl may be conservative synchronized amplifiers
+      - feet remain static position and rotation unless explicitly reviewed otherwise
+      - hands remain support/static unless hand motion is the semantic driver
+      - sparse Timeline keyframes default to 1 FPS for review examples
+      - root means pelvis/hip controller, never Person atom root
+    micro_states:
+      - rigid_upright
+      - slouched_lean_forward
+      - rear_brace_lean_back
+      - free_swinging_hands
+      - partner_brace_chest_or_shoulders
+      - partner_pelvis_or_thigh_push_point
+      - sequential_spine_wave
+      - corkscrew_pelvic_grind
+    anomaly_guards:
+      - extreme_bounce_jitter_lowpass_chest_head
+      - torso_collapse_requires_emergency_hand_brace
+      - hyper_asymmetric_grinding_requires_foot_slip_tolerance
+      - standing_lockout_if_legs_fully_extended
+    forbidden_confusions:
+      - bj_oral
+      - doggy
+      - standing_hand_head
+      - handjob
+      - receiver_response
+      - root_only_motion
+      - pose_context_only_as_clean_motion
+    negative_rules:
+      - Head/chest primary driver near partner pelvis is BJ/oral, not Cowgirl.
+      - Hand-only driver near partner pelvis is handjob or hand interaction, not clean Cowgirl.
+      - Quadruped grounding or partner-behind all-fours state is Doggy, not Cowgirl.
+      - Full standing leg extension breaks Cowgirl sitting/riding semantics.
+      - Lean-back Cowgirl is still front Cowgirl unless facing-away/back-to-partner evidence exists.
+    typical_prompts_en: [cowgirl, cowgirl grinding, cowgirl riding, cowgirl bouncing, leaning forward cowgirl, cowgirl leaning back, body roll cowgirl]
+    typical_prompts_de: [cowgirl, reiten, grindet, wippt, nach vorne gelehnt, nach hinten gelehnt, stuetzt sich hinten ab]
+
+  reverse_cowgirl:
+    family_id: reverse_cowgirl
+    description: Rider-over-receiver state with inverted yaw/back-to-partner orientation; driver logic remains pelvis/hip but facing is reversed.
+    actor_role: rider
+    partner_role: receiver
+    coordinate_frame: [partner_pelvis_local]
+    required_partner_relations: [rider_over_receiver, pelvis_aligned, back_to_partner]
+    optional_partner_relations: [facing_away_from_partner]
+    required_pose_subtypes: [reverse_cowgirl_standing_squat, reverse_cowgirl_hover, reverse_cowgirl_kneeling, reverse_cowgirl_lean_forward, reverse_cowgirl_lean_back, spider_reverse_cowgirl]
+    compatible_pose_subtypes: [reverse_cowgirl_standing_squat, reverse_cowgirl_hover, reverse_cowgirl_kneeling, reverse_cowgirl_lean_forward, reverse_cowgirl_lean_back, spider_reverse_cowgirl]
+    default_pose_subtype: reverse_cowgirl_kneeling
+    primary_motion_centers: [pelvis_hip, thighs]
+    secondary_motion_centers: [abdomen_chest, head_neck]
+    followers:
+      chest: delayed_damped_follow
+      head: horizon_or_neutral_vector
+    anchors: [feet_ik_planted_anchor, knees_or_feet_support, hands_optional_support]
+    contact_support_contexts: [hands_on_partner_legs_or_thighs, hands_on_floor_or_bed, hands_free, hands_behind_support]
+    axis_priority:
+      inverted_yaw: [facing_away_evidence, pelvis_y_translation, pelvis_xz_grind]
+    clean_motion_requirements:
+      - explicit back-to-partner or facing-away evidence
+      - pelvis_hip driver
+      - rider-over-receiver relation
+    pose_context_requirements:
+      - reversed orientation must be explicit; leaning back alone is insufficient
+    generation_requirements:
+      - partner pelvis local frame
+      - semantic pelvis_hip maps to VaM hipControl as primary visible driver
+      - pelvisControl is light follower or static support
+      - inverted yaw orientation
+      - different foot/thigh rotation compensation than front Cowgirl
+    micro_states: [spider_reverse_cowgirl, inverted_yaw_cowgirl, reverse_vertical_bounce, reverse_grinding]
+    anomaly_guards: [reverse_requires_orientation_evidence, foot_routing_inverted_yaw]
+    forbidden_confusions: [cowgirl_lean_back_supported, standing_hand_head, doggy]
+    negative_rules:
+      - Leaning back does not imply reverse Cowgirl.
+      - Reverse Cowgirl requires facing/back-to-partner evidence.
+    typical_prompts_en: [reverse cowgirl, standing reverse cowgirl, spider cowgirl]
+    typical_prompts_de: [rueckwaerts auf ihm, mit dem ruecken zu ihm, reverse cowgirl]
+
+  doggy:
+    family_id: doggy
+    description: Quadruped, bent-forward, elevated, or vertical-kneeling Z-axis dominant state with partner-behind relation.
+    actor_role: receiver_or_front_actor
+    partner_role: driver_or_behind_actor
+    coordinate_frame: [partner_behind_local, body_relative]
+    required_partner_relations: [partner_behind, behind_receiver]
+    optional_partner_relations: [receiver_prone, elevated_front_support]
+    required_pose_subtypes: [doggy_all_fours, doggy_bent_forward, doggy_elevated_support]
+    compatible_pose_subtypes: [doggy_all_fours, doggy_bent_forward, doggy_elevated_support, doggy_drop_flat, doggy_arched_upright, doggy_vertical_kneeling]
+    default_pose_subtype: doggy_all_fours
+    primary_motion_centers: [pelvis_hip, receiver_pelvis_response]
+    secondary_motion_centers: [chest_abdomen, head_neck]
+    followers:
+      chest: spring_mass_support_damper
+      head: filtered_pitch_yaw_follower
+    anchors:
+      - knees_or_shins_grounded
+      - feet_behind_pelvis
+      - hands_or_forearms_front_support
+    contact_support_contexts:
+      - hands_on_floor_or_bed
+      - forearms_on_floor_or_bed
+      - hands_on_own_thighs
+      - hands_on_partner_hips_or_torso
+      - chest_elevated_support
+    axis_priority:
+      z_thrust: [pelvis_z_translation, asymmetric_forward_impact, backward_return]
+      planar_grind: [pelvis_xz_or_yz_ellipse, pelvis_roll_yaw]
+      drop_flat: [chest_head_low, pelvis_high_pitch_extreme]
+      upright: [chest_y_high, hands_retarget_to_thighs_or_partner]
+    clean_motion_requirements:
+      - all-fours/bent-forward/elevated support or strong partner-behind relation
+      - pelvis/receiver response motion is dominant
+      - Z-axis thrusting or planar grind is visible
+      - front support anchors absorb impact
+    pose_context_requirements:
+      - kneeling alone is insufficient
+      - upright doggy needs foot routing and partner-behind context
+    generation_requirements:
+      - front support anchors
+      - partner-behind relation
+      - knee friction/support state
+    micro_states:
+      - wide_stance
+      - narrow_stance
+      - bilateral_hand_support
+      - unilateral_hand_support
+      - forearm_rest
+      - look_forward
+      - look_back_over_shoulder
+      - head_drop
+      - vertical_quadruped_kneeling
+      - asymmetric_pivot_thrust
+    anomaly_guards:
+      - hyper_lordosis_thrust
+      - unilateral_knee_slip
+      - chaotic_head_thrash_limit
+      - supine_roll_conflict
+      - unanchored_bending_conflict
+    forbidden_confusions: [cowgirl_kneeling, cowgirl_upright, standing_hand_head, bj_oral]
+    negative_rules:
+      - Do not infer doggy from kneeling alone.
+      - Upright rider-over-receiver relation is Cowgirl/Reverse Cowgirl, not doggy.
+      - If knees lose ground contact and feet carry full standing weight, it is standing/bending, not doggy.
+    typical_prompts_en: [doggy, doggy style, all fours, bent forward, elevated doggy, upright doggy]
+    typical_prompts_de: [doggy, von hinten, vierfuessler, nach vorne gebeugt, aufgestuetzt]
+
+  bj_oral:
+    family_id: bj_oral
+    description: Top-down head/chest-driven motion near partner pelvis target; pelvis is static base/isolator.
+    actor_role: giver
+    partner_role: receiver
+    coordinate_frame: [partner_pelvis_local, target_vector_local]
+    required_partner_relations: [head_near_partner_pelvis_or_genital_area]
+    optional_partner_relations: [partner_in_front]
+    required_pose_subtypes: [bj_kneeling, bj_forward_lean, bj_low_or_lying]
+    compatible_pose_subtypes: [bj_kneeling, bj_forward_lean, bj_low_or_lying, bj_deep_alignment, kneeling_general]
+    default_pose_subtype: bj_kneeling
+    primary_motion_centers: [head_neck, chest_abdomen]
+    secondary_motion_centers: [hands]
+    pelvis_role: [static_base, counterweight, isolator, not_primary_driver]
+    followers:
+      pelvis: static_base_or_damper
+      hands: optional_secondary_driver_or_static_pin
+    anchors: [knees_or_sitting_base, hands_optional_distance_lock]
+    contact_support_contexts: [hands_on_partner_hips, hands_on_partner_thighs, hands_on_floor_or_bed, synchronized_hand_tracking, static_pinning]
+    axis_priority:
+      bobbing: [head_target_vector_translation, chest_support_translation, pelvis_static]
+      circular_micro_motion: [head_pitch_yaw_roll_small_loop, chest_static_anchor]
+      hand_assisted: [hands_parallel_target_vector, phase_shift_against_head]
+      helical: [head_z_translation_coupled_to_yaw_rotation]
+      deep_alignment: [head_chest_target_axis_lock, neck_stress_limiter]
+    clean_motion_requirements:
+      - head/chest driver
+      - partner pelvis target
+      - pelvis mostly static
+      - target lock or clear distance regulation
+    pose_context_requirements:
+      - kneeling can be BJ only when head target/motion supports it
+      - single kneeling pose without target coupling is ambiguous
+    generation_requirements:
+      - partner pelvis/head target
+      - head/chest trajectory
+      - neck stress limiter
+      - pelvis isolation/damping
+    micro_states:
+      - bj_head_bob
+      - bj_circular_swirl
+      - bj_hand_assisted_loop
+      - bj_deep_alignment
+      - helical_oral_thrust
+      - static_pinning_partner_hips_thighs
+    anomaly_guards:
+      - coaxial_deep_alignment_locks_head_dof
+      - gag_reflex_spasm_is_transition_not_clean_loop
+      - missing_target_coupling_prevents_bj_family
+      - pelvis_root_driven_loop_excludes_bj
+    forbidden_confusions: [cowgirl_clean_motion, doggy, handjob_only, kissing_face_to_face]
+    negative_rules:
+      - If pelvis_hip becomes primary cyclic driver, do not classify as BJ/oral clean motion.
+      - Cowgirl-looking kneeling pose plus head-dominant partner-pelvis target is BJ/oral, not Cowgirl.
+      - Symmetric face-height target tracking is kissing/face-to-face, not BJ/oral.
+    typical_prompts_en: [bj, blowjob, oral, head bob, deep alignment, helical oral]
+    typical_prompts_de: [blasen, oral, kopfbewegung, deep throat, mit kopf]
+
+  handjob:
+    family_id: handjob
+    description: Hand-driven repetitive motion near partner pelvis/genital target; pose is contextual and pelvis is not primary driver.
+    actor_role: giver
+    partner_role: receiver
+    coordinate_frame: [partner_pelvis_local, target_vector_local]
+    required_partner_relations: [hand_near_partner_pelvis_or_genital_area]
+    optional_partner_relations: [partner_in_front]
+    required_pose_subtypes: [any_stable_pose]
+    compatible_pose_subtypes: [kneeling_general, standing_upright, cowgirl_pose_context, bj_kneeling]
+    default_pose_subtype: any_stable_pose
+    primary_motion_centers: [left_hand, right_hand, both_hands]
+    secondary_motion_centers: [chest_abdomen]
+    followers:
+      pelvis: static_or_follower
+    anchors: [feet_or_knees_or_sitting_base]
+    contact_support_contexts: [hands_on_partner_pelvis_or_genital_area, synchronized_hand_tracking, static_pinning]
+    axis_priority:
+      hand_stroke: [hand_target_vector_translation, target_lock, pelvis_static]
+      hand_circular: [hand_small_loop, wrist_pitch_yaw_noise]
+    clean_motion_requirements:
+      - hand driver
+      - partner pelvis target
+      - pelvis not primary
+    pose_context_requirements:
+      - pose is not enough; target and hand driver define family
+    generation_requirements:
+      - hand target path near partner pelvis
+      - wrist/finger noise optional
+    micro_states: [hand_repetitive_up_down, hand_forward_back, hand_circular, hand_hold]
+    anomaly_guards: [hand_only_movement_must_not_be_cowgirl]
+    forbidden_confusions: [cowgirl, doggy, bj_oral_head_driver]
+    negative_rules:
+      - Hand-only movement in Cowgirl pose is not clean Cowgirl motion.
+    typical_prompts_en: [handjob, hj, hand motion, stroking]
+    typical_prompts_de: [handjob, mit der hand, streicheln]
+
+  hand_touching:
+    family_id: hand_touching
+    description: Broad hand contact/support/tactile family for non-pelvis targets or balance support.
+    actor_role: toucher_or_supporting_actor
+    partner_role: target_or_support_surface
+    coordinate_frame: [target_local, body_relative]
+    required_partner_relations: []
+    optional_partner_relations: [partner_in_front, rider_over_receiver, active_partner_above]
+    required_pose_subtypes: [any_stable_pose]
+    compatible_pose_subtypes: [standing_upright, cowgirl_pose_context, kneeling_general, lying_receiver, missionary_supine]
+    default_pose_subtype: any_stable_pose
+    primary_motion_centers: [left_hand, right_hand, both_hands]
+    secondary_motion_centers: [head_neck, chest_abdomen]
+    followers: {}
+    anchors: [body_base]
+    contact_support_contexts: [partner_chest, partner_hips, partner_shoulders_neck, self_hair_head, self_chest_abdomen, floor_or_bed, ambiguous]
+    axis_priority:
+      locked_static: [hand_velocity_zero, support_weight]
+      locked_dynamic: [hand_parented_to_target_node, distance_regulation]
+      fk_soft_floating: [shoulder_relative_fk, perlin_noise]
+    clean_motion_requirements:
+      - hands are primary semantic center
+    pose_context_requirements:
+      - not enough for a sexual motion family without target context
+    generation_requirements:
+      - target contact region
+      - hand state machine IK_Locked_Static, IK_Locked_Dynamic, or FK_Soft_Floating
+    micro_states: [hair_stroking, body_tracing, hand_holding, partner_chest_touch, partner_hips_touch, floor_support]
+    anomaly_guards: [support_hands_are_not_family_driver]
+    forbidden_confusions: [cowgirl_clean_motion, doggy_clean_motion]
+    negative_rules:
+      - Hand-driven support/touch does not define Cowgirl clean motion.
+    typical_prompts_en: [touching, hands on chest, hands on hips, hands in hair, hand holding]
+    typical_prompts_de: [haende auf brust, haende auf huefte, haende im haar, beruehren]
+
+  missionary:
+    family_id: missionary
+    description: Supine receiver/bottom state with grounded chest/head, reactive pelvis, leg hooking, impact absorption, or counter-thrust.
+    actor_role: receiver_or_bottom_actor
+    partner_role: active_partner_above
+    coordinate_frame: [body_relative, partner_above_local]
+    required_partner_relations: [active_partner_above]
+    optional_partner_relations: [receiver_lying_on_back]
+    required_pose_subtypes: [missionary_supine, missionary_legs_up, missionary_wrapped_legs, missionary_flat_passive]
+    compatible_pose_subtypes: [lying_on_back, missionary_supine, missionary_legs_up, missionary_wrapped_legs, missionary_flat_passive, maximal_supine_flexion]
+    default_pose_subtype: missionary_supine
+    primary_motion_centers: [pelvis_counter_driver, legs_dynamic_followers, external_impact_response]
+    secondary_motion_centers: [chest_impact_follower, head_grounded_follower]
+    followers:
+      chest: impact_absorption_or_grounded
+      head: grounded_low_follow_or_thrashing_response
+      legs: dynamic_isolators_or_partner_hooks
+    anchors: [chest_head_grounded_or_low, back_support, shoulders_neck_support]
+    contact_support_contexts: [hands_variable, legs_wrapped_or_lifted, partner_hooking]
+    axis_priority:
+      counter_thrust: [reactive_pelvis_y_lift, external_z_impact]
+      legs_up: [thigh_flexion, pelvis_posterior_tilt, foot_partner_hook]
+      impact_absorption: [chest_grounded, spine_spring_mass, head_thrash_optional]
+      roll_thrust: [pelvis_roll, chest_grounded_counter_rotation]
+    clean_motion_requirements:
+      - supine pose
+      - chest/head low or grounded
+      - pelvis reactive or counter-driver
+      - external impact/partner-above context for active thrust interpretation
+    pose_context_requirements:
+      - lying on back or supine anchor state
+    generation_requirements:
+      - supine baseline
+      - partner-above context
+      - legs/floor/partner hook constraints
+    micro_states:
+      - missionary_counter_thrust
+      - missionary_impact_absorption
+      - missionary_leg_wrapping
+      - missionary_passive_flat
+      - maximal_supine_flexion
+      - supine_roll_thrust
+      - head_thrash_response
+    anomaly_guards:
+      - active_z_thrust_without_external_impact_is_conflict
+      - anterior_pelvic_tilt_on_base_level_is_spine_inversion
+      - independent_air_stepping_is_invalid
+      - thigh_chest_clipping_requires_abduction
+    forbidden_confusions: [cowgirl_sitting, doggy_prone, standing_face_to_face]
+    negative_rules:
+      - If chest lifts upright into rider/sitting state, not Missionary.
+      - If body is belly-down/prone, not Missionary.
+      - If legs bear standing weight, not Missionary.
+    typical_prompts_en: [missionary, legs up, lying on back, counter thrust, leg hook]
+    typical_prompts_de: [missionar, auf dem ruecken, beine hoch, beine um ihn, gegenbewegung]
+
+  standing_hand_head:
+    family_id: standing_hand_head
+    description: Standing or bipedal gesture state where hands/head dominate and no riding/quadruped/oral target context is sufficient.
+    actor_role: standing_actor
+    partner_role: unknown_or_optional
+    coordinate_frame: [body_relative]
+    required_partner_relations: []
+    optional_partner_relations: [partner_in_front]
+    required_pose_subtypes: [standing_upright]
+    compatible_pose_subtypes: [standing_upright, standing_gesture, bending_over_unanchored]
+    default_pose_subtype: standing_upright
+    primary_motion_centers: [hands, head_neck]
+    secondary_motion_centers: [chest_abdomen]
+    followers: {}
+    anchors: [feet_ik_planted_anchor]
+    contact_support_contexts: [hands_free, self_body, ambiguous]
+    axis_priority:
+      standing_gesture: [foot_weight_support, hand_head_motion, pelvis_not_riding_driver]
+    clean_motion_requirements:
+      - standing pose
+      - hands/head dominant
+      - pelvis not riding/partner target driver
+    pose_context_requirements: [standing support]
+    generation_requirements: [gesture target if any]
+    micro_states: [standing_lockout, hand_head_gesture, bending_over_without_target]
+    anomaly_guards: [standing_lockout_excludes_cowgirl]
+    forbidden_confusions: [cowgirl, doggy, bj_oral]
+    negative_rules:
+      - Standing hand/head motion must not be Cowgirl clean motion.
+    typical_prompts_en: [standing gesture, hand head movement]
+    typical_prompts_de: [steht, hand kopf bewegung]
+
+  receiver_response:
+    family_id: receiver_response
+    description: Passive or reactive receiver motion where the actor is not the active semantic driver.
+    actor_role: receiver
+    partner_role: active_partner
+    coordinate_frame: [body_relative, partner_local_if_available]
+    required_partner_relations: [partner_drives_motion]
+    optional_partner_relations: [receiver_lying_on_back, receiver_prone]
+    required_pose_subtypes: [lying_receiver, supine_receiver, prone_receiver]
+    compatible_pose_subtypes: [lying_on_back, lying_prone, receiver_context, missionary_supine]
+    default_pose_subtype: receiver_context
+    primary_motion_centers: [pelvis_response, chest_response, external_impact_response]
+    secondary_motion_centers: [head_neck, legs]
+    followers: {}
+    anchors: [body_support]
+    contact_support_contexts: [partner_contact, body_grounded]
+    axis_priority:
+      response: [external_impact, damped_body_response, no_active_rider_driver]
+    clean_motion_requirements:
+      - reactive/counter-motion
+      - not active rider
+    pose_context_requirements: [receiver role]
+    generation_requirements: [partner driver if generating response]
+    micro_states: [passive_response, counter_response, impact_absorption]
+    anomaly_guards: [receiver_response_not_active_cowgirl]
+    forbidden_confusions: [cowgirl_active_rider, doggy_front_actor_driver]
+    negative_rules:
+      - Receiver response is not active rider Cowgirl.
+    typical_prompts_en: [receiver response, passive response]
+    typical_prompts_de: [reaktion, passiv]
+
+  transition_setup:
+    family_id: transition_setup
+    description: Intro, target acquisition, alignment, anchor establishment, or repositioning without clean cyclic semantic motion.
+    actor_role: variable
+    partner_role: variable
+    coordinate_frame: [body_relative, partner_local_if_available]
+    required_partner_relations: []
+    optional_partner_relations: []
+    required_pose_subtypes: [any]
+    compatible_pose_subtypes: [any]
+    default_pose_subtype: any
+    primary_motion_centers: [full_body_transition, pelvis_hip, hands, chest_abdomen, head_neck]
+    secondary_motion_centers: []
+    followers: {}
+    anchors: [establishing]
+    contact_support_contexts: [variable]
+    axis_priority:
+      transition: [high_controller_delta, establishing_anchors, no_cyclic_curve]
+    clean_motion_requirements: [not clean cyclic motion]
+    pose_context_requirements: [alignment/setup]
+    generation_requirements: [do not use as clean primitive without human confirmation]
+    micro_states: [intro_transition, target_acquisition, anchor_establishment, insertion_alignment]
+    anomaly_guards: [do_not_promote_transition_to_clean_motion]
+    forbidden_confusions: [clean_cowgirl_motion, clean_doggy_motion, clean_bj_motion]
+    negative_rules:
+      - Setup/transition must not be selected as clean motion.
+    typical_prompts_en: [intro, transition, setup, alignment]
+    typical_prompts_de: [intro, uebergang, ausrichten]
+
+  pose_context_hold:
+    family_id: pose_context_hold
+    description: Valid or possible pose context with no meaningful primary motion driver.
+    actor_role: variable
+    partner_role: variable
+    coordinate_frame: [body_relative]
+    required_partner_relations: []
+    optional_partner_relations: []
+    required_pose_subtypes: [any]
+    compatible_pose_subtypes: [any]
+    default_pose_subtype: any
+    primary_motion_centers: [static_pose, breathing_micro_motion]
+    secondary_motion_centers: [head_neck, chest_abdomen]
+    followers: {}
+    anchors: [pose_anchors]
+    contact_support_contexts: [variable]
+    axis_priority:
+      hold: [low_velocity, micro_noise_only, no_primary_driver]
+    clean_motion_requirements: [low motion, no primary driver]
+    pose_context_requirements: [pose can be valid without motion]
+    generation_requirements: [not a clean motion primitive]
+    micro_states: [pose_hold, breathing_noise, gaze_micro_motion]
+    anomaly_guards: [pose_alone_is_not_clean_motion]
+    forbidden_confusions: [clean_cowgirl_motion, clean_doggy_motion, clean_bj_motion]
+    negative_rules:
+      - Pose alone is not clean motion.
+    typical_prompts_en: [hold, pose hold, low motion]
+    typical_prompts_de: [halten, pose, kaum bewegung]
+
+  unknown:
+    family_id: unknown
+    description: Insufficient, contradictory, broken, or unsupported semantic evidence.
+    actor_role: unknown
+    partner_role: unknown
+    coordinate_frame: [unknown]
+    required_partner_relations: []
+    optional_partner_relations: []
+    required_pose_subtypes: []
+    compatible_pose_subtypes: []
+    default_pose_subtype: unknown
+    primary_motion_centers: [unknown]
+    secondary_motion_centers: []
+    followers: {}
+    anchors: []
+    contact_support_contexts: [unknown]
+    axis_priority: {}
+    clean_motion_requirements: []
+    pose_context_requirements: []
+    generation_requirements: [human review required]
+    micro_states: [broken_pose, controller_missing, contradictory_motion]
+    anomaly_guards: [do_not_generate_from_unknown]
+    forbidden_confusions: []
+    negative_rules:
+      - Do not generate from unknown semantic state.
+    typical_prompts_en: []
+    typical_prompts_de: []

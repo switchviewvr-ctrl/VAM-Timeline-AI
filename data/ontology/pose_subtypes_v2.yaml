@@ -1,0 +1,139 @@
+schema_version: pose_subtypes_v2
+meaning_source: semantik_master_konsolidiert_docx
+pose_subtypes:
+  cowgirl_upright:
+    family: cowgirl
+    torso_lean: upright
+    support_base: feet_knees_spread
+    facing_context: front_cowgirl
+  cowgirl_kneeling:
+    family: cowgirl
+    support_base: knees_feet_spread
+    facing_context: front_cowgirl
+  cowgirl_squat:
+    family: cowgirl
+    support_base: feet_knees_spread
+    facing_context: front_cowgirl
+  cowgirl_lean_forward_supported:
+    family: cowgirl
+    torso_lean: forward
+    support_context: hands_forward_support
+    likely_targets: [partner_chest, partner_shoulders, bed_or_floor]
+    facing_context: front_cowgirl
+  cowgirl_lean_back_supported:
+    family: cowgirl
+    torso_lean: backward
+    support_context: hands_behind_support
+    likely_targets: [rear_floor_drop, partner_pelvis_or_thighs, partner_legs_or_thighs]
+    facing_context: front_cowgirl
+    not_reverse: true
+  cowgirl_sequential_spine_wave:
+    family: cowgirl
+    torso_lean: dynamic_wave
+    support_context: variable
+  cowgirl_corkscrew_grind:
+    family: cowgirl
+    torso_lean: upright_or_variable
+    support_context: variable
+  reverse_cowgirl_kneeling:
+    family: reverse_cowgirl
+    facing_context: back_to_partner
+  reverse_cowgirl_standing_squat:
+    family: reverse_cowgirl
+    facing_context: back_to_partner
+  reverse_cowgirl_hover:
+    family: reverse_cowgirl
+    facing_context: back_to_partner
+  reverse_cowgirl_lean_forward:
+    family: reverse_cowgirl
+    torso_lean: forward
+    facing_context: back_to_partner
+  reverse_cowgirl_lean_back:
+    family: reverse_cowgirl
+    torso_lean: backward
+    facing_context: back_to_partner
+  spider_reverse_cowgirl:
+    family: reverse_cowgirl
+    facing_context: back_to_partner
+    orientation: inverted_yaw
+  doggy_all_fours:
+    family: doggy
+    torso_lean: forward
+    support_base: hands_and_knees
+  doggy_bent_forward:
+    family: doggy
+    torso_lean: forward
+    support_base: hands_or_forearms_front
+  doggy_elevated_support:
+    family: doggy
+    torso_lean: forward
+    support_base: elevated_front_support
+  doggy_drop_flat:
+    family: doggy
+    torso_lean: low_forward
+    support_base: forearms_or_chest_low
+  doggy_arched_upright:
+    family: doggy
+    torso_lean: upright_or_arched
+    support_base: knees_with_hands_retargeted
+  doggy_vertical_kneeling:
+    family: doggy
+    torso_lean: upright
+    support_base: knees_feet_with_partner_behind
+    requires_partner_relation: partner_behind
+  bj_kneeling:
+    family: bj_oral
+    torso_lean: forward
+    support_base: knees_or_sitting_base
+  bj_forward_lean:
+    family: bj_oral
+    torso_lean: forward
+    support_base: knees_or_hands
+  bj_low_or_lying:
+    family: bj_oral
+    torso_lean: low_forward
+    support_base: floor_or_bed
+  bj_deep_alignment:
+    family: bj_oral
+    torso_lean: extreme_forward
+    support_base: knees_or_floor
+    limiter_rules: [neck_stress_limiter]
+  missionary_supine:
+    family: missionary
+    torso_lean: supine
+    support_base: back_chest_head_grounded
+  missionary_legs_up:
+    family: missionary
+    torso_lean: supine
+    support_base: shoulders_neck_back
+    leg_state: lifted_or_hooked
+  missionary_wrapped_legs:
+    family: missionary
+    torso_lean: supine
+    support_base: back
+    leg_state: partner_hook
+  missionary_flat_passive:
+    family: missionary
+    torso_lean: supine
+    support_base: full_back
+  maximal_supine_flexion:
+    family: missionary
+    torso_lean: supine_extreme
+    support_base: shoulders_neck
+  standing_upright:
+    family: standing_hand_head
+    support_base: feet
+  standing_gesture:
+    family: standing_hand_head
+    support_base: feet
+  bending_over_unanchored:
+    family: standing_hand_head
+    support_base: feet
+    not_doggy: true
+  receiver_context:
+    family: receiver_response
+    support_base: body_support
+  any_stable_pose:
+    family: handjob
+  unknown:
+    family: unknown
